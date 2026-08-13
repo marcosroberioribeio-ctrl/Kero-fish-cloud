@@ -1,4 +1,4 @@
-importar streamlit como st
+importar streamlit as st
 
 st.set_page_config(page_title="Kero Fish - Peixe e Camarão", page_icon="ðŸ Ÿ", layout="wide")
 
@@ -41,3 +41,4 @@ elif opcao == "Cadastro":
 outro:
     st.title(f"ðŸ“Œ {opcao}")
     st.info("Módulo em desenvolvimento. Em breve novos recursos aqui!")
+    
