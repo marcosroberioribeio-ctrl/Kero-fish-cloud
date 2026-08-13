@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# BANCO DE DADOS (PERSISTENCIA SQLITE)
+# BANCO DE DADOS (PERSISTENCIA SQLITE + LIMPEZA)
 # ==========================================
 def init_db():
     conn = sqlite3.connect("kerofish.db")
@@ -91,6 +91,9 @@ def init_db():
             data_registro TEXT
         )
     ''')
+
+    # LIMPEZA AUTOMATICA DE DADOS CORROMPIDOS ANTIGOS (COM SIMBOLOS E EMOJIS)
+    c.execute("DELETE FROM produtos WHERE nome LIKE '%Ãƒ%' OR categoria LIKE '%Ãƒ%' OR nome LIKE '%Ã°%'")
 
     # Carga Inicial de Produtos Padrao da Kero Fish
     produtos_iniciais = [
