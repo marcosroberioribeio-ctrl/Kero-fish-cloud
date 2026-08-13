@@ -52,10 +52,22 @@ def init_db():
             data_venda TEXT
         )
     ''')
+
+    # Tabela de Financeiro (Entradas e Saidas)
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS financeiro (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            descricao TEXT NOT NULL,
+            tipo TEXT NOT NULL,
+            valor REAL NOT NULL,
+            data_mov TEXT NOT NULL
+        )
+    ''')
     
     conn.commit()
     conn.close()
 
+# Inicializa o banco de dados
 init_db()
 
 # ==========================================
@@ -66,7 +78,7 @@ st.sidebar.markdown("---")
 
 opcao = st.sidebar.radio(
     "Navegacao",
-    ["Dashboard", "Clientes", "Estoque de Pescados", "Vendas"]
+    ["Dashboard", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"]
 )
 
 # ==========================================
@@ -79,17 +91,22 @@ if opcao == "Dashboard":
     conn = sqlite3.connect("kerofish.db")
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
     df_clientes = pd.read_sql_query("SELECT * FROM clientes", conn)
-    df_produtos = pd.read_sql_query("SELECT * FROM produtos", conn)
+    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
     
     total_faturado = df_vendas["valor_total"].sum() if not df_vendas.empty else 0.0
     total_vendas = len(df_vendas)
     total_clientes = len(df_clientes)
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Faturamento Total", f"R$ {total_faturado:,.2f}")
+    entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum() if not df_fin.empty else 0.0
+    saidas = df_fin[df_fin["tipo"] == "Saida"]["valor"].sum() if not df_fin.empty else 0.0
+    saldo_caixa = entradas - saidas
+    
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Faturamento Vendas", f"R$ {total_faturado:,.2f}")
     col2.metric("Total de Vendas", f"{total_vendas}")
     col3.metric("Clientes Cadastrados", f"{total_clientes}")
+    col4.metric("Saldo do Caixa", f"R$ {saldo_caixa:,.2f}")
     
     st.markdown("---")
     if not df_vendas.empty:
@@ -131,7 +148,7 @@ elif opcao == "Clientes":
     st.dataframe(df_clientes, use_container_width=True)
 
 # ==========================================
-# PAINEL 3: ESTOQUE DE PESCADOS (MERCADORIAS)
+# PAINEL 3: ESTOQUE DE PESCADOS
 # ==========================================
 elif opcao == "Estoque de Pescados":
     st.title("Controle de Estoque e Mercadorias")
@@ -152,7 +169,7 @@ elif opcao == "Estoque de Pescados":
                           (nome_p, categoria, preco_kg, estoque_kg))
                 conn.commit()
                 conn.close()
-                st.success(f"Mercadoria '{nome_p}' cadastrada no estoque com sucesso!")
+                st.success(f"Mercadoria '{nome_p}' cadastrada com sucesso!")
             else:
                 st.warning("O nome da mercadoria e obrigatorio.")
                 
@@ -178,7 +195,7 @@ elif opcao == "Vendas":
     lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
     
     if not lista_clientes or not lista_produtos:
-        st.warning("Para registrar uma venda, voce precisa ter pelo menos 1 cliente e 1 mercadoria cadastrados.")
+        st.warning("AtenÃ§Ã£o: Para registrar uma venda, vocÃª precisa primeiro cadastrar pelo menos 1 Cliente e 1 Mercadoria no menu ao lado!")
     else:
         with st.form("form_venda", clear_on_submit=True):
             cliente_sel = st.selectbox("Selecione o Cliente", lista_clientes)
@@ -199,10 +216,57 @@ elif opcao == "Vendas":
                 else:
                     conn = sqlite3.connect("kerofish.db")
                     c = conn.cursor()
+                    hoje = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    
+                    # 1. Registrar Venda
                     c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                              (cliente_sel, produto_sel, qtd_kg, valor_calculado, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                              (cliente_sel, produto_sel, qtd_kg, valor_calculado, hoje))
+                    
+                    # 2. Baixar Estoque
                     novo_estoque = prod_info["estoque_kg"] - qtd_kg
                     c.execute("UPDATE produtos SET estoque_kg = ? WHERE id = ?", (novo_estoque, prod_info["id"]))
+                    
+                    # 3. Lancar Automaticamente no Financeiro como Entrada
+                    c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
+                              (f"Venda: {produto_sel} ({cliente_sel})", "Entrada", valor_calculado, hoje))
+                    
                     conn.commit()
                     conn.close()
-                    st.success(f"Venda registrada para {cliente_sel}! Valor: R$ {valor_calculado:.2f}")
+                    st.success(f"Venda registrada e lancada no Financeiro com sucesso!")
+
+# ==========================================
+# PAINEL 5: FINANCEIRO
+# ==========================================
+elif opcao == "Financeiro":
+    st.title("Controle Financeiro / Fluxo de Caixa")
+    
+    with st.form("form_financeiro", clear_on_submit=True):
+        st.subheader("Lancamento Manual (Despesas / Entradas)")
+        descricao = st.text_input("Descricao (ex: Pagamento de Energia, Frete, Fornecedor)")
+        tipo = st.selectbox("Tipo de Movimentacao", ["Saida (Despesa)", "Entrada (Receita)"])
+        valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
+        salvar_fin = st.form_submit_button("Registrar Lancamento")
+        
+        if salvar_fin:
+            if descricao.strip():
+                tipo_limpo = "Saida" if "Saida" in tipo else "Entrada"
+                conn = sqlite3.connect("kerofish.db")
+                c = conn.cursor()
+                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
+                          (descricao, tipo_limpo, valor, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                conn.commit()
+                conn.close()
+                st.success("Lancamento financeiro registrado com sucesso!")
+            else:
+                st.warning("A descricao e obrigatoria.")
+                
+    st.markdown("---")
+    st.subheader("Historico de Movimentacoes Financeiras")
+    conn = sqlite3.connect("kerofish.db")
+    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn.close()
+    
+    if not df_fin.empty:
+        st.dataframe(df_fin, use_container_width=True)
+    else:
+        st.info("Nenhum lancamento financeiro registrado ainda.")
