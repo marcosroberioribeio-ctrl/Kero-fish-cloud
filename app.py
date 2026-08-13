@@ -2,8 +2,10 @@ importar streamlit como st
 
 st.set_page_config(page_title="Kero Fish - Peixe e Camarão", page_icon="ðŸ Ÿ", layout="wide")
 
-# Exibe a imagem oficial na barra lateral
-st.sidebar.image("Screenshot_20260813_084749_WhatsApp.jpg", use_container_width=True)
+# Exibe a foto oficial do logo
+st.sidebar.image("logo.jpg", use_container_width=True)
+
+st.sidebar.caption("â€¢ PEIXE E CAMARÃƒO â€¢")
 
 opcao = st.sidebar.radio(
     "Navegaço",
