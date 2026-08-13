@@ -14,13 +14,15 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("**Contatos:**\n- (85) 98502-6019\n- (85) 99277-6984")
 st.sidebar.markdown("**Instagram:** @kerofish")
 
-# Initializing Session States for persistence within current session
+# Estrutura de dados na sessÃ£o
 if "clientes" not in st.session_state:
     st.session_state.clientes = []
 if "produtos" not in st.session_state:
     st.session_state.produtos = []
 if "estoque" not in st.session_state:
     st.session_state.estoque = []
+if "vendas" not in st.session_state:
+    st.session_state.vendas = []
 
 # Tela de InÃ­cio
 if opcao == "In\u00edcio":
@@ -28,11 +30,13 @@ if opcao == "In\u00edcio":
     st.caption("Sistema de Gest\u00e3o Integrada")
     st.markdown("---")
     
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Vendas do M\u00eas", "R$ 0,00")
+    total_vendas = sum(v.get("valor_total", 0.0) for v in st.session_state.vendas)
+    total_kg_vendidoss = sum(v.get("qtd_kg", 0.0) for v in st.session_state.vendas)
+    total_est = sum(item.get("quantidade_kg", 0.0) for item in st.session_state.estoque) - total_kg_vendidoss
     
-    total_kg = sum(item.get("quantidade_kg", 0) for item in st.session_state.estoque)
-    col2.metric("Estoque Atual", f"{total_kg:.1f} kg")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Vendas do M\u00eas", f"R$ {total_vendas:,.2f}")
+    col2.metric("Estoque Atual", f"{max(total_est, 0.0):.1f} kg")
     col3.metric("Clientes Cadastrados", len(st.session_state.clientes))
 
 # Tela de Cadastro
@@ -73,8 +77,6 @@ elif opcao == "Estoque / Produ\u00e7\u00e3o":
     st.title("Controle de Estoque e Produ\u00e7\u00e3o")
     st.markdown("---")
     
-    st.subheader("Lan\u00e7ar Entrada / Sa\u00edda de Estoque")
-    
     lista_produtos = [p["nome"] for p in st.session_state.produtos] if st.session_state.produtos else ["Camar\u00e3o Fresco", "Peixe Inteiro", "Fil\u00e9 de Peixe"]
     
     with st.form("form_estoque", clear_on_submit=True):
@@ -91,10 +93,52 @@ elif opcao == "Estoque / Produ\u00e7\u00e3o":
 
     if st.session_state.estoque:
         st.markdown("---")
-        st.subheader("Hist\u00f3rico do Estoque Atual")
+        st.subheader("Hist\u00f3rico do Estoque")
         st.dataframe(st.session_state.estoque)
 
-# Outras telas
-else:
-    st.title(f"{opcao}")
-    st.info("M\u00f3dulo em desenvolvimento. Em breve novos recursos aqui!")
+# Tela de Vendas
+elif opcao == "Vendas":
+    st.title("Registro de Vendas")
+    st.markdown("---")
+    
+    lista_cli = [c["nome"] for c in st.session_state.clientes] if st.session_state.clientes else ["Cliente Avulso"]
+    lista_prod = [p["nome"] for p in st.session_state.produtos] if st.session_state.produtos else ["Camar\u00e3o Fresco", "Peixe Inteiro"]
+    
+    with st.form("form_vendas", clear_on_submit=True):
+        col_c, col_p = st.columns(2)
+        cli_sel = col_c.selectbox("Cliente", lista_cli)
+        prod_sel = col_p.selectbox("Produto Vendido", lista_prod)
+        
+        col_k, col_v = st.columns(2)
+        qtd_venda = col_k.number_input("Quantidade Vendida (kg)", min_value=0.1, step=0.5)
+        preco_kg = col_v.number_input("Pre\u00e7o cobrado por kg (R$)", min_value=0.0, step=1.0)
+        
+        sub_venda = st.form_submit_button("Finalizar Venda")
+        if sub_venda:
+            v_total = qtd_venda * preco_kg
+            st.session_state.vendas.append({
+                "cliente": cli_sel,
+                "produto": prod_sel,
+                "qtd_kg": qtd_venda,
+                "preco_kg": preco_kg,
+                "valor_total": v_total
+            })
+            st.success(f"Venda de R$ {v_total:,.2f} para {cli_sel} registrada com sucesso!")
+
+    if st.session_state.vendas:
+        st.markdown("---")
+        st.subheader("Hist\u00f3rico de Vendas")
+        st.dataframe(st.session_state.vendas)
+
+# Tela de Financeiro
+elif opcao == "Financeiro":
+    st.title("Painel Financeiro")
+    st.markdown("---")
+    
+    total_faturado = sum(v.get("valor_total", 0.0) for v in st.session_state.vendas)
+    qtd_vendas = len(st.session_state.vendas)
+    ticket_medio = (total_faturado / qtd_vendas) if qtd_vendas > 0 else 0.0
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Faturamento Total", f"R$ {total_faturado:,.2f}")
+    c2.metric("Ticket M\u00e9dio por Venda", f"R$ {ticket_medio:,.2f}")
