@@ -1,14 +1,13 @@
-# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import datetime
 
 # ==========================================
-# CONFIGURAÃ‡ÃƒO DA PÃGINA
+# CONFIGURACAO DA PAGINA
 # ==========================================
 st.set_page_config(
-    page_title="Kero Fish - ERP de GestÃ£o",
+    page_title="Kero Fish - ERP de Gestao",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -22,7 +21,7 @@ def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Criar tabelas caso nÃ£o existam
+    # Criar tabelas caso nao existam
     c.execute('''
         CREATE TABLE IF NOT EXISTS clientes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,13 +69,13 @@ def init_db():
 init_db()
 
 # ==========================================
-# MENU LATERAL / NAVEGAÃ‡ÃƒO
+# MENU LATERAL / NAVEGACAO
 # ==========================================
 st.sidebar.title("Kero Fish ERP")
 st.sidebar.markdown("---")
 
 opcao = st.sidebar.radio(
-    "NavegaÃ§Ã£o",
+    "Navegacao",
     ["Dashboard", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"]
 )
 
@@ -84,8 +83,8 @@ opcao = st.sidebar.radio(
 # PAINEL 1: DASHBOARD
 # ==========================================
 if opcao == "Dashboard":
-    st.title("Painel Geral de GestÃ£o")
-    st.markdown("VisualizaÃ§Ã£o rÃ¡pida do desempenho do seu negÃ³cio.")
+    st.title("Painel Geral de Gestao")
+    st.markdown("Visualizacao rapida do desempenho do seu negocio.")
     
     conn = sqlite3.connect(DB_FILE)
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
@@ -98,7 +97,7 @@ if opcao == "Dashboard":
     total_clientes = len(df_clientes)
     
     entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum() if not df_fin.empty else 0.0
-    saidas = df_fin[df_fin["tipo"] == "SaÃ­da"]["valor"].sum() if not df_fin.empty else 0.0
+    saidas = df_fin[df_fin["tipo"] == "Saida"]["valor"].sum() if not df_fin.empty else 0.0
     saldo_caixa = entradas - saidas
     
     col1, col2, col3, col4 = st.columns(4)
@@ -109,20 +108,20 @@ if opcao == "Dashboard":
     
     st.markdown("---")
     if not df_vendas.empty:
-        st.subheader("Ãšltimas Vendas Realizadas")
+        st.subheader("Ultimas Vendas Realizadas")
         st.dataframe(df_vendas.tail(10), use_container_width=True)
     else:
-        st.info("Nenhuma venda registrada atÃ© o momento.")
+        st.info("Nenhuma venda registrada ate o momento.")
 
 # ==========================================
 # PAINEL 2: CLIENTES
 # ==========================================
 elif opcao == "Clientes":
-    st.title("GestÃ£o de Clientes")
+    st.title("Gestao de Clientes")
     
     with st.form("form_cliente", clear_on_submit=True):
         st.subheader("Cadastrar Novo Cliente")
-        nome = st.text_input("Nome Completo / RazÃ£o Social")
+        nome = st.text_input("Nome Completo / Razao Social")
         telefone = st.text_input("Telefone / WhatsApp")
         cidade = st.text_input("Cidade")
         salvar = st.form_submit_button("Cadastrar Cliente")
@@ -137,7 +136,7 @@ elif opcao == "Clientes":
                 conn.close()
                 st.success(f"Cliente '{nome}' cadastrado com sucesso!")
             else:
-                st.warning("O nome do cliente Ã© obrigatÃ³rio.")
+                st.warning("O nome do cliente e obrigatorio.")
                 
     st.markdown("---")
     st.subheader("Lista de Clientes Cadastrados")
@@ -154,9 +153,9 @@ elif opcao == "Estoque de Pescados":
     
     with st.form("form_produto", clear_on_submit=True):
         st.subheader("Cadastrar Nova Mercadoria / Pescado")
-        nome_p = st.text_input("Nome da Mercadoria (ex: TilÃ¡pia, CamarÃ£o, Tambaqui)")
-        categoria = st.selectbox("Categoria", ["Peixe Inteiro", "FilÃ©", "Fruto do Mar", "Outros"])
-        preco_kg = st.number_input("PreÃ§o por KG (R$)", min_value=0.0, format="%.2f")
+        nome_p = st.text_input("Nome da Mercadoria (ex: Tilapia, Camarao, Tambaqui)")
+        categoria = st.selectbox("Categoria", ["Peixe Inteiro", "File", "Fruto do Mar", "Outros"])
+        preco_kg = st.number_input("Preco por KG (R$)", min_value=0.0, format="%.2f")
         estoque_kg = st.number_input("Quantidade Inicial em Estoque (KG)", min_value=0.0, format="%.2f")
         salvar_p = st.form_submit_button("Cadastrar no Estoque")
         
@@ -170,7 +169,7 @@ elif opcao == "Estoque de Pescados":
                 conn.close()
                 st.success(f"Mercadoria '{nome_p}' cadastrada com sucesso!")
             else:
-                st.warning("O nome da mercadoria Ã© obrigatÃ³rio.")
+                st.warning("O nome da mercadoria e obrigatorio.")
                 
     st.markdown("---")
     st.subheader("Estoque Atual de Mercadorias")
@@ -194,7 +193,7 @@ elif opcao == "Vendas":
     lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
     
     if not lista_clientes or not lista_produtos:
-        st.warning("AtenÃ§Ã£o: Para registrar uma venda, vocÃª precisa primeiro cadastrar pelo menos 1 Cliente e 1 Mercadoria no menu ao lado!")
+        st.warning("Atencao: Para registrar uma venda, voce precisa primeiro cadastrar pelo menos 1 Cliente e 1 Mercadoria no menu ao lado!")
     else:
         with st.form("form_venda", clear_on_submit=True):
             cliente_sel = st.selectbox("Selecione o Cliente", lista_clientes)
@@ -205,13 +204,13 @@ elif opcao == "Vendas":
             preco_unit = prod_info["preco_kg"]
             valor_calculado = qtd_kg * preco_unit
             
-            st.info(f"PreÃ§o UnitÃ¡rio: R$ {preco_unit:.2f}/KG | Valor Total Estimado: R$ {valor_calculado:.2f}")
+            st.info(f"Preco Unitario: R$ {preco_unit:.2f}/KG | Valor Total Estimado: R$ {valor_calculado:.2f}")
             
             finalizar = st.form_submit_button("Confirmar e Registrar Venda")
             
             if finalizar:
                 if qtd_kg > prod_info["estoque_kg"]:
-                    st.error(f"Estoque insuficiente! DisponÃ­vel: {prod_info['estoque_kg']} KG.")
+                    st.error(f"Estoque insuficiente! Disponivel: {prod_info['estoque_kg']} KG.")
                 else:
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
@@ -225,7 +224,7 @@ elif opcao == "Vendas":
                     novo_estoque = prod_info["estoque_kg"] - qtd_kg
                     c.execute("UPDATE produtos SET estoque_kg = ? WHERE id = ?", (novo_estoque, prod_info["id"]))
                     
-                    # 3. LanÃ§ar no Financeiro
+                    # 3. Lancar no Financeiro
                     c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
                               (f"Venda: {produto_sel} ({cliente_sel})", "Entrada", valor_calculado, hoje))
                     
@@ -240,27 +239,27 @@ elif opcao == "Financeiro":
     st.title("Controle Financeiro / Fluxo de Caixa")
     
     with st.form("form_financeiro", clear_on_submit=True):
-        st.subheader("LanÃ§amento Manual (Despesas / Entradas)")
-        descricao = st.text_input("DescriÃ§Ã£o (ex: Energia, Frete, Fornecedor)")
-        tipo = st.selectbox("Tipo de MovimentaÃ§Ã£o", ["SaÃ­da (Despesa)", "Entrada (Receita)"])
+        st.subheader("Lancamento Manual (Despesas / Entradas)")
+        descricao = st.text_input("Descricao (ex: Energia, Frete, Fornecedor)")
+        tipo = st.selectbox("Tipo de Movimentacao", ["Saida (Despesa)", "Entrada (Receita)"])
         valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
-        salvar_fin = st.form_submit_button("Registrar LanÃ§amento")
+        salvar_fin = st.form_submit_button("Registrar Lancamento")
         
         if salvar_fin:
             if descricao.strip():
-                tipo_limpo = "SaÃ­da" if "SaÃ­da" in tipo else "Entrada"
+                tipo_limpo = "Saida" if "Saida" in tipo else "Entrada"
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
                           (descricao, tipo_limpo, valor, datetime.now().strftime("%Y-%m-%d %H:%M")))
                 conn.commit()
                 conn.close()
-                st.success("LanÃ§amento financeiro registrado com sucesso!")
+                st.success("Lancamento financeiro registrado com sucesso!")
             else:
-                st.warning("A descriÃ§Ã£o Ã© obrigatÃ³ria.")
+                st.warning("A descricao e obrigatoria.")
                 
     st.markdown("---")
-    st.subheader("HistÃ³rico de MovimentaÃ§Ãµes Financeiras")
+    st.subheader("Historico de Movimentacoes Financeiras")
     conn = sqlite3.connect(DB_FILE)
     df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
@@ -268,4 +267,4 @@ elif opcao == "Financeiro":
     if not df_fin.empty:
         st.dataframe(df_fin, use_container_width=True)
     else:
-        st.info("Nenhum lanÃ§amento financeiro registrado ainda.")
+        st.info("Nenhum lancamento financeiro registrado ainda.")
