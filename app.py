@@ -2,7 +2,6 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-import os
 from datetime import datetime
 
 # ==========================================
@@ -14,25 +13,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ==========================================
-# BANCO DE DADOS (GARANTE ESTRUTURA ATUALIZADA)
-# ==========================================
 DB_FILE = "kerofish.db"
 
+# ==========================================
+# BANCO DE DADOS
+# ==========================================
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Se as tabelas antigas existirem com estrutura errada, recria
-    try:
-        c.execute("SELECT preco_kg FROM produtos LIMIT 1")
-    except sqlite3.OperationalError:
-        c.execute("DROP TABLE IF EXISTS produtos")
-        c.execute("DROP TABLE IF EXISTS vendas")
-        c.execute("DROP TABLE IF EXISTS clientes")
-        c.execute("DROP TABLE IF EXISTS financeiro")
-
-    # Tabela de Clientes
+    # Criar tabelas caso nÃ£o existam
     c.execute('''
         CREATE TABLE IF NOT EXISTS clientes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +33,6 @@ def init_db():
         )
     ''')
     
-    # Tabela de Produtos / Pescados
     c.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +43,6 @@ def init_db():
         )
     ''')
     
-    # Tabela de Vendas
     c.execute('''
         CREATE TABLE IF NOT EXISTS vendas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +54,6 @@ def init_db():
         )
     ''')
 
-    # Tabela de Financeiro
     c.execute('''
         CREATE TABLE IF NOT EXISTS financeiro (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +84,7 @@ opcao = st.sidebar.radio(
 # PAINEL 1: DASHBOARD
 # ==========================================
 if opcao == "Dashboard":
-    st.title("ðŸ“Š Painel Geral de GestÃ£o")
+    st.title("Painel Geral de GestÃ£o")
     st.markdown("VisualizaÃ§Ã£o rÃ¡pida do desempenho do seu negÃ³cio.")
     
     conn = sqlite3.connect(DB_FILE)
@@ -131,7 +118,7 @@ if opcao == "Dashboard":
 # PAINEL 2: CLIENTES
 # ==========================================
 elif opcao == "Clientes":
-    st.title("ðŸ‘¥ GestÃ£o de Clientes")
+    st.title("GestÃ£o de Clientes")
     
     with st.form("form_cliente", clear_on_submit=True):
         st.subheader("Cadastrar Novo Cliente")
@@ -163,7 +150,7 @@ elif opcao == "Clientes":
 # PAINEL 3: ESTOQUE DE PESCADOS
 # ==========================================
 elif opcao == "Estoque de Pescados":
-    st.title("ðŸ“¦ Controle de Estoque e Mercadorias")
+    st.title("Controle de Estoque e Mercadorias")
     
     with st.form("form_produto", clear_on_submit=True):
         st.subheader("Cadastrar Nova Mercadoria / Pescado")
@@ -182,7 +169,6 @@ elif opcao == "Estoque de Pescados":
                 conn.commit()
                 conn.close()
                 st.success(f"Mercadoria '{nome_p}' cadastrada com sucesso!")
-                st.rerun()
             else:
                 st.warning("O nome da mercadoria Ã© obrigatÃ³rio.")
                 
@@ -197,7 +183,7 @@ elif opcao == "Estoque de Pescados":
 # PAINEL 4: VENDAS
 # ==========================================
 elif opcao == "Vendas":
-    st.title("ðŸ’° Registrar Venda")
+    st.title("Registrar Venda")
     
     conn = sqlite3.connect(DB_FILE)
     df_c = pd.read_sql_query("SELECT nome FROM clientes", conn)
@@ -245,14 +231,13 @@ elif opcao == "Vendas":
                     
                     conn.commit()
                     conn.close()
-                    st.success(f"Venda registrada com sucesso!")
-                    st.rerun()
+                    st.success("Venda registrada com sucesso!")
 
 # ==========================================
 # PAINEL 5: FINANCEIRO
 # ==========================================
 elif opcao == "Financeiro":
-    st.title("ðŸ’µ Controle Financeiro / Fluxo de Caixa")
+    st.title("Controle Financeiro / Fluxo de Caixa")
     
     with st.form("form_financeiro", clear_on_submit=True):
         st.subheader("LanÃ§amento Manual (Despesas / Entradas)")
@@ -263,7 +248,7 @@ elif opcao == "Financeiro":
         
         if salvar_fin:
             if descricao.strip():
-                tipo_limpo = "SaÃ­da" if "SaÃ­da" in tipo or "Saida" in tipo else "Entrada"
+                tipo_limpo = "SaÃ­da" if "SaÃ­da" in tipo else "Entrada"
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
@@ -271,7 +256,6 @@ elif opcao == "Financeiro":
                 conn.commit()
                 conn.close()
                 st.success("LanÃ§amento financeiro registrado com sucesso!")
-                st.rerun()
             else:
                 st.warning("A descriÃ§Ã£o Ã© obrigatÃ³ria.")
                 
