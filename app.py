@@ -1,4 +1,4 @@
-importar streamlit as st
+import streamlit as st
 
 st.set_page_config(page_title="Kero Fish - Peixe e Camarão", page_icon="ðŸ Ÿ", layout="wide")
 
