@@ -1,14 +1,14 @@
-# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import sqlite3
+import os
 from datetime import datetime
 
 # ==========================================
 # CONFIGURAÃ‡ÃƒO DA PÃGINA
 # ==========================================
 st.set_page_config(
-    page_title="Kero Fish - ERP de GestÃ£o",
+    page_title="Kero Fish - ERP de Gest\u00e3o",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -30,6 +30,9 @@ def init_db():
             data_cad TEXT
         )
     ''')
+    
+    # Recria a tabela de produtos para apagar textos corrompidos anteriores
+    c.execute("DROP TABLE IF EXISTS produtos")
     
     # Tabela de Produtos
     c.execute('''
@@ -93,22 +96,19 @@ def init_db():
         )
     ''')
 
-    # Limpa versÃµes anteriores sem acento para redefinir com a acentuaÃ§Ã£o correta
-    c.execute("DELETE FROM produtos")
-
-    # Carga Inicial de Produtos PadrÃ£o da Kero Fish (Com AcentuaÃ§Ã£o Correta)
+    # Carga Inicial de Produtos PadrÃ£o da Kero Fish (Com Unicode Protegido)
     produtos_iniciais = [
-        ("CamarÃ£o P", "CamarÃ£o", "kg", 0.0),
-        ("CamarÃ£o M", "CamarÃ£o", "kg", 0.0),
-        ("CamarÃ£o G", "CamarÃ£o", "kg", 0.0),
-        ("CamarÃ£o GG", "CamarÃ£o", "kg", 0.0),
+        ("Camar\u00e3o P", "Camar\u00e3o", "kg", 0.0),
+        ("Camar\u00e3o M", "Camar\u00e3o", "kg", 0.0),
+        ("Camar\u00e3o G", "Camar\u00e3o", "kg", 0.0),
+        ("Camar\u00e3o GG", "Camar\u00e3o", "kg", 0.0),
         ("Pargo", "Peixe", "kg", 0.0),
-        ("SalmÃ£o", "Peixe", "kg", 0.0),
-        ("TilÃ¡pia", "Peixe", "kg", 0.0),
+        ("Salm\u00e3o", "Peixe", "kg", 0.0),
+        ("Til\u00e1pia", "Peixe", "kg", 0.0),
         ("Atum", "Peixe", "kg", 0.0),
         ("Sardinha", "Peixe", "kg", 0.0),
         ("Castanha de Caju", "Produtos Regionais", "un/kg", 0.0),
-        ("CajuÃ­na", "Produtos Regionais", "garrafa", 0.0),
+        ("Caju\u00edna", "Produtos Regionais", "garrafa", 0.0),
         ("Temperos", "Produtos Regionais", "pacote", 0.0),
         ("Manteiga da Terra", "Produtos Regionais", "garrafa", 0.0),
         ("Queijo", "Produtos Regionais", "kg", 0.0),
@@ -133,17 +133,17 @@ except Exception:
     st.sidebar.title("Kero Fish")
 
 st.sidebar.title("Kero Fish ERP")
-st.sidebar.caption("Sistema Integrado de GestÃ£o Comercial")
+st.sidebar.caption("Sistema Integrado de Gest\u00e3o Comercial")
 
 menu = st.sidebar.radio(
-    "MÃ³dulos do Sistema",
+    "M\u00f3dulos do Sistema",
     [
         "Dashboard", 
         "Cadastros", 
         "Controle de Estoque", 
-        "Vendas e DevoluÃ§Ãµes", 
+        "Vendas e Devolu\u00e7\u00f5es", 
         "Financeiro e Despesas",
-        "SeguranÃ§a e Boas PrÃ¡ticas"
+        "Seguran\u00e7a e Boas Pr\u00e1ticas"
     ]
 )
 
@@ -156,7 +156,7 @@ st.sidebar.markdown("**Instagram:** @kerofish")
 # ==========================================
 if menu == "Dashboard":
     st.title("Painel de Controle Gerencial")
-    st.caption("VisÃ£o geral em tempo real da performance do seu negÃ³cio.")
+    st.caption("Vis\u00e3o geral em tempo real da performance do seu neg\u00f3cio.")
     st.markdown("---")
 
     conn = get_connection()
@@ -172,16 +172,16 @@ if menu == "Dashboard":
     lucro_liquido = faturamento_liquido - total_despesas
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Faturamento LÃ­quido", f"R$ {faturamento_liquido:,.2f}")
+    col1.metric("Faturamento L\u00edquido", f"R$ {faturamento_liquido:,.2f}")
     col2.metric("Total de Despesas", f"R$ {total_despesas:,.2f}")
-    col3.metric("Lucro LÃ­quido Real", f"R$ {lucro_liquido:,.2f}")
+    col3.metric("Lucro L\u00edquido Real", f"R$ {lucro_liquido:,.2f}")
     col4.metric("Base de Clientes", len(df_clientes))
 
     st.markdown("---")
     
     col_g1, col_g2 = st.columns(2)
     with col_g1:
-        st.subheader("Ãšltimas Vendas Realizadas")
+        st.subheader("\u00daltimas Vendas Realizadas")
         if not df_vendas.empty:
             conn = get_connection()
             recents = pd.read_sql_query("""
@@ -194,7 +194,7 @@ if menu == "Dashboard":
             conn.close()
             st.dataframe(recents, use_container_width=True)
         else:
-            st.info("Nenhuma venda cadastrada atÃ© o momento.")
+            st.info("Nenhuma venda cadastrada at\u00e9 o momento.")
 
     with col_g2:
         st.subheader("Resumo Geral de Vendas por Categoria")
@@ -210,13 +210,13 @@ if menu == "Dashboard":
             conn.close()
             st.dataframe(cat_summary, use_container_width=True)
         else:
-            st.info("Aguardando primeiros lanÃ§amentos comerciais.")
+            st.info("Aguardando primeiros lan\u00e7amentos comerciais.")
 
 # ==========================================
 # MÃ“DULO 2: CADASTROS GERAIS
 # ==========================================
 elif menu == "Cadastros":
-    st.title("GestÃ£o de Cadastros")
+    st.title("Gest\u00e3o de Cadastros")
     st.markdown("---")
 
     tab1, tab2 = st.tabs(["Cadastrar Cliente", "Cadastrar Novo Produto"])
@@ -225,7 +225,7 @@ elif menu == "Cadastros":
         st.subheader("Novo Cliente")
         with st.form("form_novo_cliente", clear_on_submit=True):
             col_c1, col_c2, col_c3 = st.columns(3)
-            nome_cli = col_c1.text_input("Nome / RazÃ£o Social *")
+            nome_cli = col_c1.text_input("Nome / Raz\u00e3o Social *")
             tel_cli = col_c2.text_input("Telefone / WhatsApp")
             cid_cli = col_c3.text_input("Cidade / Bairro")
             
@@ -255,9 +255,9 @@ elif menu == "Cadastros":
         with st.form("form_novo_prod", clear_on_submit=True):
             col_p1, col_p2, col_p3, col_p4 = st.columns(4)
             nome_prod = col_p1.text_input("Nome do Produto *")
-            cat_prod = col_p2.selectbox("Categoria", ["CamarÃ£o", "Peixe", "Produtos Regionais", "Outros"])
+            cat_prod = col_p2.selectbox("Categoria", ["Camar\u00e3o", "Peixe", "Produtos Regionais", "Outros"])
             unid_prod = col_p3.selectbox("Unidade de Medida", ["kg", "unidade", "garrafa", "pacote", "caixa"])
-            preco_padrao = col_p4.number_input("PreÃ§o Sugerido (R$)", min_value=0.0, step=1.0)
+            preco_padrao = col_p4.number_input("Pre\u00e7o Sugerido (R$)", min_value=0.0, step=1.0)
             
             submit_prod = st.form_submit_button("Salvar Produto")
             if submit_prod:
@@ -271,14 +271,14 @@ elif menu == "Cadastros":
                         conn.close()
                         st.success(f"Produto '{nome_prod}' cadastrado com sucesso!")
                     except Exception:
-                        st.error("Erro: Produto com esse nome jÃ¡ existe.")
+                        st.error("Erro: Produto com esse nome j\u00e1 existe.")
                 else:
                     st.error("Informe o nome do produto.")
 
         st.markdown("---")
-        st.subheader("Produtos no CatÃ¡logo")
+        st.subheader("Produtos no Cat\u00e1logo")
         conn = get_connection()
-        df_p = pd.read_sql_query("SELECT id as ID, nome as Produto, categoria as Categoria, unidade as Unidade, preco_padrao as 'PreÃ§o Sugerido (R$)' FROM produtos ORDER BY categoria, nome", conn)
+        df_p = pd.read_sql_query("SELECT id as ID, nome as Produto, categoria as Categoria, unidade as Unidade, preco_padrao as 'Pre\u00e7o Sugerido (R$)' FROM produtos ORDER BY categoria, nome", conn)
         conn.close()
         st.dataframe(df_p, use_container_width=True)
 
@@ -299,11 +299,11 @@ elif menu == "Controle de Estoque":
     with st.form("form_estoque", clear_on_submit=True):
         col_e1, col_e2, col_e3, col_e4 = st.columns(4)
         prod_selecionado = col_e1.selectbox("Produto", list(dict_produtos.keys())) if dict_produtos else None
-        tipo_mov = col_e2.selectbox("Tipo de MovimentaÃ§Ã£o", ["Entrada (Compra / ProduÃ§Ã£o)", "SaÃ­da (Perda / Avaria / Ajuste)"])
+        tipo_mov = col_e2.selectbox("Tipo de Movimenta\u00e7\u00e3o", ["Entrada (Compra / Produ\u00e7\u00e3o)", "Sa\u00edda (Perda / Avaria / Ajuste)"])
         qtd_mov = col_e3.number_input("Quantidade", min_value=0.1, step=0.5)
-        obs_mov = col_e4.text_input("ObservaÃ§Ã£o / Fornecedor")
+        obs_mov = col_e4.text_input("Observa\u00e7\u00e3o / Fornecedor")
 
-        btn_est = st.form_submit_button("Registrar MovimentaÃ§Ã£o")
+        btn_est = st.form_submit_button("Registrar Movimenta\u00e7\u00e3o")
         if btn_est and prod_selecionado:
             prod_id = dict_produtos[prod_selecionado]
             fator = 1 if "Entrada" in tipo_mov else -1
@@ -316,10 +316,10 @@ elif menu == "Controle de Estoque":
                       (prod_id, tipo_mov, qtd_final, obs_mov, data_hoje))
             conn.commit()
             conn.close()
-            st.success(f"MovimentaÃ§Ã£o de {qtd_mov} em '{prod_selecionado}' registrada com sucesso!")
+            st.success(f"Movimenta\u00e7\u00e3o de {qtd_mov} em '{prod_selecionado}' registrada com sucesso!")
 
     st.markdown("---")
-    st.subheader("Saldo Atual e PosiÃ§Ã£o do Estoque Real")
+    st.subheader("Saldo Atual e Posi\u00e7\u00e3o do Estoque Real")
 
     conn = get_connection()
     query_saldo = """
@@ -346,8 +346,8 @@ elif menu == "Controle de Estoque":
 # ==========================================
 # MÃ“DULO 4: VENDAS & DEVOLUÃ‡Ã•ES
 # ==========================================
-elif menu == "Vendas e DevoluÃ§Ãµes":
-    st.title("Frente de Vendas e DevoluÃ§Ãµes")
+elif menu == "Vendas e Devolu\u00e7\u00f5es":
+    st.title("Frente de Vendas e Devolu\u00e7\u00f5es")
     st.markdown("---")
 
     conn = get_connection()
@@ -356,10 +356,10 @@ elif menu == "Vendas e DevoluÃ§Ãµes":
     conn.close()
 
     dict_cli = {row['nome']: row['id'] for _, row in df_cli.iterrows()}
-    dict_cli["Cliente Avulso / BalcÃ£o"] = None
+    dict_cli["Cliente Avulso / Balc\u00e3o"] = None
     dict_prod = {row['nome']: (row['id'], row['preco_padrao']) for _, row in df_prod.iterrows()}
 
-    tab_venda, tab_devolucao = st.tabs(["LanÃ§ar Nova Venda", "Registrar DevoluÃ§Ã£o / Estorno"])
+    tab_venda, tab_devolucao = st.tabs(["Lan\u00e7ar Nova Venda", "Registrar Devolu\u00e7\u00e3o / Estorno"])
 
     with tab_venda:
         with st.form("form_venda", clear_on_submit=True):
@@ -370,7 +370,7 @@ elif menu == "Vendas e DevoluÃ§Ãµes":
             col_v3, col_v4 = st.columns(2)
             qtd_venda = col_v3.number_input("Quantidade Vendida", min_value=0.1, step=0.5)
             preco_sugerido = dict_prod[prod_sel][1] if (prod_sel and prod_sel in dict_prod) else 0.0
-            preco_unit = col_v4.number_input("PreÃ§o UnitÃ¡rio / kg (R$)", min_value=0.0, value=float(preco_sugerido), step=1.0)
+            preco_unit = col_v4.number_input("Pre\u00e7o Unit\u00e1rio / kg (R$)", min_value=0.0, value=float(preco_sugerido), step=1.0)
 
             sub_venda = st.form_submit_button("Finalizar e Registrar Venda")
             if sub_venda and prod_sel:
@@ -391,7 +391,7 @@ elif menu == "Vendas e DevoluÃ§Ãµes":
                 st.success(f"Venda efetuada com sucesso! Total: R$ {valor_total:,.2f}")
 
     with tab_devolucao:
-        st.info("A devoluÃ§Ã£o abate o valor faturado do sistema e retorna a mercadoria para o saldo de estoque.")
+        st.info("A devolu\u00e7\u00e3o abate o valor faturado do sistema e retorna a mercadoria para o saldo de estoque.")
         with st.form("form_dev", clear_on_submit=True):
             col_d1, col_d2 = st.columns(2)
             cli_dev_sel = col_d1.selectbox("Cliente que Devolveu", list(dict_cli.keys()), key="dev_cli")
@@ -401,7 +401,7 @@ elif menu == "Vendas e DevoluÃ§Ãµes":
             qtd_dev = col_d3.number_input("Quantidade Devolvida", min_value=0.1, step=0.5)
             valor_dev = col_d4.number_input("Valor Total Estornado (R$)", min_value=0.0, step=1.0)
 
-            sub_dev = st.form_submit_button("Confirmar Estorno / DevoluÃ§Ã£o")
+            sub_dev = st.form_submit_button("Confirmar Estorno / Devolu\u00e7\u00e3o")
             if sub_dev and prod_dev_sel:
                 prod_id = dict_prod[prod_dev_sel][0]
                 cli_id = dict_cli[cli_dev_sel]
@@ -416,20 +416,20 @@ elif menu == "Vendas e DevoluÃ§Ãµes":
                 conn.commit()
                 conn.close()
 
-                st.warning(f"DevoluÃ§Ã£o de R$ {valor_dev:,.2f} em '{prod_dev_sel}' registrada!")
+                st.warning(f"Devolu\u00e7\u00e3o de R$ {valor_dev:,.2f} em '{prod_dev_sel}' registrada!")
 
     st.markdown("---")
-    st.subheader("HistÃ³rico Comercial Recente")
+    st.subheader("Hist\u00f3rico Comercial Recente")
     conn = get_connection()
     df_hist_vendas = pd.read_sql_query("""
         SELECT 
             v.id as 'ID',
             v.data_venda as 'Data/Hora',
-            v.tipo_operacao as 'OperaÃ§Ã£o',
+            v.tipo_operacao as 'Opera\u00e7\u00e3o',
             COALESCE(c.nome, 'Cliente Avulso') as 'Cliente',
             p.nome as 'Produto',
             v.quantidade as 'Qtd',
-            v.valor_unitario as 'PreÃ§o Un. (R$)',
+            v.valor_unitario as 'Pre\u00e7o Un. (R$)',
             v.valor_total as 'Valor Total (R$)'
         FROM vendas v
         LEFT JOIN clientes c ON v.cliente_id = c.id
@@ -443,20 +443,20 @@ elif menu == "Vendas e DevoluÃ§Ãµes":
 # MÃ“DULO 5: FINANCEIRO & DESPESAS
 # ==========================================
 elif menu == "Financeiro e Despesas":
-    st.title("GestÃ£o Financeira e Fluxo de Caixa")
+    st.title("Gest\u00e3o Financeira e Fluxo de Caixa")
     st.markdown("---")
 
-    tab_f1, tab_f2 = st.tabs(["Registrar Despesa / Custo", "RelatÃ³rio Financeiro e ExportaÃ§Ã£o"])
+    tab_f1, tab_f2 = st.tabs(["Registrar Despesa / Custo", "Relat\u00f3rio Financeiro e Exporta\u00e7\u00e3o"])
 
     with tab_f1:
-        st.subheader("LanÃ§amento de Despesas Operacionais (Embalagem, Frete, Energia, etc.)")
+        st.subheader("Lan\u00e7amento de Despesas Operacionais (Embalagem, Frete, Energia, etc.)")
         with st.form("form_despesa", clear_on_submit=True):
             col_f1, col_f2, col_f3 = st.columns(3)
-            desc_desp = col_f1.text_input("DescriÃ§Ã£o da Despesa *")
-            cat_desp = col_f2.selectbox("Categoria", ["Frete / Transporte", "Embalagem", "Energia / Ãgua", "Insumos", "SalÃ¡rios / PrÃ³-labore", "Outros"])
+            desc_desp = col_f1.text_input("Descri\u00e7\u00e3o da Despesa *")
+            cat_desp = col_f2.selectbox("Categoria", ["Frete / Transporte", "Embalagem", "Energia / \u00c1gua", "Insumos", "Sal\u00e1rios / Pr\u00f3-labore", "Outros"])
             valor_desp = col_f3.number_input("Valor da Despesa (R$)", min_value=0.1, step=5.0)
 
-            sub_desp = st.form_submit_button("LanÃ§ar Despesa")
+            sub_desp = st.form_submit_button("Lan\u00e7ar Despesa")
             if sub_desp:
                 if desc_desp:
                     data_hoje = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -466,14 +466,14 @@ elif menu == "Financeiro e Despesas":
                               (desc_desp, cat_desp, valor_desp, data_hoje))
                     conn.commit()
                     conn.close()
-                    st.success(f"Despesa '{desc_desp}' de R$ {valor_desp:,.2f} lanÃ§ada!")
+                    st.success(f"Despesa '{desc_desp}' de R$ {valor_desp:,.2f} lan\u00e7ada!")
                 else:
-                    st.error("Informe a descriÃ§Ã£o da despesa.")
+                    st.error("Informe a descri\u00e7\u00e3o da despesa.")
 
     with tab_f2:
-        st.subheader("RelatÃ³rio de SaÃ­das e Custos")
+        st.subheader("Relat\u00f3rio de Sa\u00eddas e Custos")
         conn = get_connection()
-        df_despesas_lista = pd.read_sql_query("SELECT id as ID, data_despesa as Data, descricao as DescriÃ§Ã£o, categoria as Categoria, valor as 'Valor (R$)' FROM despesas ORDER BY id DESC", conn)
+        df_despesas_lista = pd.read_sql_query("SELECT id as ID, data_despesa as Data, descricao as Descri\u00e7\u00e3o, categoria as Categoria, valor as 'Valor (R$)' FROM despesas ORDER BY id DESC", conn)
         conn.close()
 
         st.dataframe(df_despesas_lista, use_container_width=True)
@@ -481,7 +481,7 @@ elif menu == "Financeiro e Despesas":
         if not df_despesas_lista.empty:
             csv = df_despesas_lista.to_csv(index=False).encode('utf-8')
             st.download_button(
-                label="Baixar RelatÃ³rio de Despesas (CSV/Excel)",
+                label="Baixar Relat\u00f3rio de Despesas (CSV/Excel)",
                 data=csv,
                 file_name="despesas_kerofish.csv",
                 mime="text/csv"
@@ -490,41 +490,41 @@ elif menu == "Financeiro e Despesas":
 # ==========================================
 # MÃ“DULO 6: SEGURANÃ‡A & BOAS PRÃTICAS
 # ==========================================
-elif menu == "SeguranÃ§a e Boas PrÃ¡ticas":
-    st.title("SeguranÃ§a, Boas PrÃ¡ticas e Higiene")
-    st.caption("OrientaÃ§Ãµes tÃ©cnicas de conservaÃ§Ã£o de pescados e controle diÃ¡rio de rotina.")
+elif menu == "Seguran\u00e7a e Boas Pr\u00e1ticas":
+    st.title("Seguran\u00e7a, Boas Pr\u00e1ticas e Higiene")
+    st.caption("Orienta\u00e7\u00f5es t\u00e9cnicas de conserva\u00e7\u00e3o de pescados e controle di\u00e1rio de rotina.")
     st.markdown("---")
 
     tab_s1, tab_s2, tab_s3 = st.tabs([
-        "ConservaÃ§Ã£o e Higiene dos Pescados", 
-        "SeguranÃ§a dos Dados e Backup", 
-        "Checklist DiÃ¡rio de Qualidade"
+        "Conserva\u00e7\u00e3o e Higiene dos Pescados", 
+        "Seguran\u00e7a dos Dados e Backup", 
+        "Checklist Di\u00e1rio de Qualidade"
     ])
 
     with tab_s1:
-        st.subheader("Boas PrÃ¡ticas de ConservaÃ§Ã£o (CamarÃ£o e Peixes)")
+        st.subheader("Boas Pr\u00e1ticas de Conserva\u00e7\u00e3o (Camar\u00e3o e Peixes)")
         st.markdown("""
-        - **Cadeia do Frio:** O camarÃ£o e peixes frescos devem ser mantidos sempre entre **0Â°C e 4Â°C** ou congelados a **-18Â°C ou mais frio**.
-        - **Evitar ContaminaÃ§Ã£o Cruzada:** Nunca armazene produtos brutos/sujos junto com produtos prontos para consumo.
+        - **Cadeia do Frio:** O camar\u00e3o e peixes frescos devem ser mantidos sempre entre **0\u00b0C e 4\u00b0C** ou congelados a **-18\u00b0C ou mais frio**.
+        - **Evitar Contamina\u00e7\u00e3o Cruzada:** Nunca armazene produtos brutos/sujos junto com produtos prontos para consumo.
         - **Regra FIFO / PEPS:** *Primeiro que Entra, Primeiro que Sai*. Venda sempre o lote mais antigo primeiro.
-        - **Higiene dos UtensÃ­lios:** Lave e sanitize caixas tÃ©rmicas, balanÃ§as e facas a cada troca de lote ou inÃ­cio de expediente.
+        - **Higiene dos Utens\u00edlios:** Lave e sanitize caixas t\u00e9rmicas, balan\u00e7as e facas a cada troca de lote ou in\u00edcio de expediente.
         """)
 
     with tab_s2:
-        st.subheader("SeguranÃ§a da InformaÃ§Ã£o e Backup")
+        st.subheader("Seguran\u00e7a da Informa\u00e7\u00e3o e Backup")
         st.markdown("""
-        - **Backup Semanal:** Como os dados ficam salvos em arquivo interno, exporte o relatÃ³rio da aba **Financeiro** ao menos uma vez por semana.
-        - **Privacidade dos Clientes:** Mantenha os dados de telefone e endereÃ§o protegidos para uso exclusivo de vendas da Kero Fish.
-        - **Acesso Limitado:** NÃ£o forneÃ§a o link de ediÃ§Ã£o do sistema para terceiros.
+        - **Backup Semanal:** Como os dados ficam salvos em arquivo interno, exporte o relat\u00f3rio da aba **Financeiro** ao menos uma vez por semana.
+        - **Privacidade dos Clientes:** Mantenha os dados de telefone e endere\u00e7o protegidos para uso exclusivo de vendas da Kero Fish.
+        - **Acesso Limitado:** N\u00e3o forne\u00e7a o link de edi\u00e7\u00e3o do sistema para terceiros.
         """)
 
     with tab_s3:
-        st.subheader("Registrar Controle de Qualidade DiÃ¡rio")
+        st.subheader("Registrar Controle de Qualidade Di\u00e1rio")
         with st.form("form_checklist", clear_on_submit=True):
             col_k1, col_k2, col_k3 = st.columns(3)
-            resp = col_k1.text_input("ResponsÃ¡vel pela Checagem")
-            temp = col_k2.number_input("Temperatura do Freezer (Â°C)", value=-18.0, step=1.0)
-            hig_ok = col_k3.selectbox("Higiene das Caixas/Freezers OK?", ["Sim", "NÃ£o"])
+            resp = col_k1.text_input("Respons\u00e1vel pela Checagem")
+            temp = col_k2.number_input("Temperatura do Freezer (\u00b0C)", value=-18.0, step=1.0)
+            hig_ok = col_k3.selectbox("Higiene das Caixas/Freezers OK?", ["Sim", "N\u00e3o"])
 
             sub_chk = st.form_submit_button("Salvar Registro de Qualidade")
             if sub_chk:
@@ -536,13 +536,13 @@ elif menu == "SeguranÃ§a e Boas PrÃ¡ticas":
                               (resp, temp, hig_ok, data_hoje))
                     conn.commit()
                     conn.close()
-                    st.success("Registro de qualidade e seguranÃ§a salvo com sucesso!")
+                    st.success("Registro de qualidade e seguran\u00e7a salvo com sucesso!")
                 else:
-                    st.error("Informe o nome do responsÃ¡vel.")
+                    st.error("Informe o nome do respons\u00e1vel.")
 
         st.markdown("---")
-        st.subheader("HistÃ³rico de Registros de Qualidade")
+        st.subheader("Hist\u00f3rico de Registros de Qualidade")
         conn = get_connection()
-        df_chk = pd.read_sql_query("SELECT id as ID, data_registro as 'Data/Hora', responsavel as ResponsÃ¡vel, temperatura_freezer as 'Temp (Â°C)', higiene_ok as 'Higiene OK' FROM checklists_seguranca ORDER BY id DESC", conn)
+        df_chk = pd.read_sql_query("SELECT id as ID, data_registro as 'Data/Hora', responsavel as Respons\u00e1vel, temperatura_freezer as 'Temp (\u00b0C)', higiene_ok as 'Higiene OK' FROM checklists_seguranca ORDER BY id DESC", conn)
         conn.close()
         st.dataframe(df_chk, use_container_width=True)
