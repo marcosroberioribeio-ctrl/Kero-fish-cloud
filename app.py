@@ -13,7 +13,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# BANCO DE DADOS (PERSISTENCIA SQLITE + LIMPEZA)
+# BANCO DE DADOS (PERSISTENCIA SQLITE)
 # ==========================================
 def init_db():
     conn = sqlite3.connect("kerofish.db")
@@ -30,7 +30,8 @@ def init_db():
         )
     ''')
     
-    # Tabela de Produtos
+    # Tabela de Produtos - Limpeza forÃ§ada de duplicados e corrompidos antigos
+    c.execute('DROP TABLE IF EXISTS produtos')
     c.execute('''
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,10 +93,7 @@ def init_db():
         )
     ''')
 
-    # LIMPEZA AUTOMATICA DE DADOS CORROMPIDOS ANTIGOS (COM SIMBOLOS E EMOJIS)
-    c.execute("DELETE FROM produtos WHERE nome LIKE '%Ãƒ%' OR categoria LIKE '%Ãƒ%' OR nome LIKE '%Ã°%'")
-
-    # Carga Inicial de Produtos Padrao da Kero Fish
+    # Carga Inicial Limpa de Produtos Padrao da Kero Fish (Sem acentuacao para evitar conflito de codificacao)
     produtos_iniciais = [
         ("Camarao P", "Camarao", "kg", 0.0),
         ("Camarao M", "Camarao", "kg", 0.0),
@@ -252,9 +250,11 @@ elif menu == "Cadastros":
     with tab2:
         st.subheader("Novo Produto")
         with st.form("form_novo_prod", clear_on_submit=True):
-            col_p1, col_p2, col_p3, col_p4 = st.columns(4)
+            col_p1, col_p2 = st.columns(2)
             nome_prod = col_p1.text_input("Nome do Produto *")
             cat_prod = col_p2.selectbox("Categoria", ["Camarao", "Peixe", "Produtos Regionais", "Outros"])
+            
+            col_p3, col_p4 = st.columns(2)
             unid_prod = col_p3.selectbox("Unidade de Medida", ["kg", "unidade", "garrafa", "pacote", "caixa"])
             preco_padrao = col_p4.number_input("Preco Sugerido (R$)", min_value=0.0, step=1.0)
             
@@ -297,13 +297,13 @@ elif menu == "Controle de Estoque":
     st.subheader("Entrada / Ajuste Manual de Estoque")
     with st.form("form_estoque", clear_on_submit=True):
         col_e1, col_e2, col_e3, col_e4 = st.columns(4)
-        prod_selecionado = col_e1.selectbox("Produto", list(dict_produtos.keys()))
+        prod_selecionado = col_e1.selectbox("Produto", list(dict_produtos.keys())) if dict_produtos else None
         tipo_mov = col_e2.selectbox("Tipo de Movimentacao", ["Entrada (Compra / Producao)", "Saida (Perda / Avaria / Ajuste)"])
         qtd_mov = col_e3.number_input("Quantidade", min_value=0.1, step=0.5)
         obs_mov = col_e4.text_input("Observacao / Fornecedor")
 
         btn_est = st.form_submit_button("Registrar Movimentacao")
-        if btn_est:
+        if btn_est and prod_selecionado:
             prod_id = dict_produtos[prod_selecionado]
             fator = 1 if "Entrada" in tipo_mov else -1
             qtd_final = qtd_mov * fator
@@ -364,15 +364,15 @@ elif menu == "Vendas e Devolucoes":
         with st.form("form_venda", clear_on_submit=True):
             col_v1, col_v2 = st.columns(2)
             cli_sel = col_v1.selectbox("Cliente", list(dict_cli.keys()))
-            prod_sel = col_v2.selectbox("Produto Vendido", list(dict_prod.keys()))
+            prod_sel = col_v2.selectbox("Produto Vendido", list(dict_prod.keys())) if dict_prod else None
 
             col_v3, col_v4 = st.columns(2)
             qtd_venda = col_v3.number_input("Quantidade Vendida", min_value=0.1, step=0.5)
-            preco_sugerido = dict_prod[prod_sel][1] if prod_sel in dict_prod else 0.0
+            preco_sugerido = dict_prod[prod_sel][1] if (prod_sel and prod_sel in dict_prod) else 0.0
             preco_unit = col_v4.number_input("Preco Unitario / kg (R$)", min_value=0.0, value=float(preco_sugerido), step=1.0)
 
             sub_venda = st.form_submit_button("Finalizar e Registrar Venda")
-            if sub_venda:
+            if sub_venda and prod_sel:
                 prod_id = dict_prod[prod_sel][0]
                 cli_id = dict_cli[cli_sel]
                 valor_total = qtd_venda * preco_unit
@@ -394,14 +394,14 @@ elif menu == "Vendas e Devolucoes":
         with st.form("form_dev", clear_on_submit=True):
             col_d1, col_d2 = st.columns(2)
             cli_dev_sel = col_d1.selectbox("Cliente que Devolveu", list(dict_cli.keys()), key="dev_cli")
-            prod_dev_sel = col_d2.selectbox("Produto Devolvido", list(dict_prod.keys()), key="dev_prod")
+            prod_dev_sel = col_d2.selectbox("Produto Devolvido", list(dict_prod.keys()), key="dev_prod") if dict_prod else None
 
             col_d3, col_d4 = st.columns(2)
             qtd_dev = col_d3.number_input("Quantidade Devolvida", min_value=0.1, step=0.5)
             valor_dev = col_d4.number_input("Valor Total Estornado (R$)", min_value=0.0, step=1.0)
 
             sub_dev = st.form_submit_button("Confirmar Estorno / Devolucao")
-            if sub_dev:
+            if sub_dev and prod_dev_sel:
                 prod_id = dict_prod[prod_dev_sel][0]
                 cli_id = dict_cli[cli_dev_sel]
                 data_hoje = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
