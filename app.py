@@ -33,9 +33,9 @@ if logo_encontrada:
 else:
     st.sidebar.warning("Atencao: Envie o arquivo da logo para a raiz do GitHub com o nome 'logo.png' ou 'logo.jpg'.")
 
-st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe_allow_html=True)
-st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
-st.sidebar.markdown("---")
+# st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe_allow_html=True)
+# st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
+# st.sidebar.markdown("---")
 
 opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Fornecedores", "Clientes", "Estoque", "Vendas", "Financeiro", "Normas" ])
 
