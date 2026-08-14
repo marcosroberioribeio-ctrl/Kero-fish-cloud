@@ -29,7 +29,7 @@ for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "jpg.jpg"]:
         break
 
 if logo_encontrada:
-    st.sidebar.image(logo_encontrada, use_column_width=True)
+    st.sidebar.image(logo_encontrada, use_container_width=True)
 else:
     st.sidebar.warning("Atencao: Envie o arquivo da logo para a raiz do GitHub com o nome 'logo.png' ou 'logo.jpg'.")
 
