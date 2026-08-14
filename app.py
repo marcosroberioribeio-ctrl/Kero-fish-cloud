@@ -37,10 +37,10 @@ st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe
 st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
-opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
+opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Clientes", "Estoque Geral", "Vendas", "Financeiro"])
 
 # 1. DASHBOARD
-if opcao == "Painel":
+if opcao == "Painel Geral":
     st.title("Painel Geral de Gest\u00e3o")
     st.markdown("Visualiza\u00e7\u00e3o r\u00e1pida do desempenho do seu neg\u00f3cio.")
     
@@ -91,7 +91,7 @@ elif opcao == "Clientes":
     st.dataframe(df_c, use_container_width=True)
 
 # 3. ESTOQUE DE PESCADOS
-elif opcao == "Estoque de Pescados":
+elif opcao == "Estoque Geral":
     st.title("Controle de Estoque e Mercadorias")
     
     aba1, aba2 = st.tabs(["Cadastrar", "Excluir Produto"])
