@@ -1,6 +1,8 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import sqlite3
+import os
 from datetime import datetime
 
 st.set_page_config(page_title="Kero Fish ERP", layout="wide")
@@ -19,22 +21,28 @@ def init_db():
 
 init_db()
 
-# Logo e Slogan da Empresa (PEIXE E CAMARAO)
-try:
-    st.sidebar.image("logo.png", use_column_width=True)
-except:
-    pass
+# Logo Automatica (Procura PNG ou JPG na raiz do repositorio)
+logo_encontrada = None
+for ext in ["png", "jpg", "jpeg", "PNG", "JPG"]:
+    if os.path.exists(f"logo.{ext}"):
+        logo_encontrada = f"logo.{ext}"
+        break
+
+if logo_encontrada:
+    st.sidebar.image(logo_encontrada, use_column_width=True)
+else:
+    st.sidebar.warning("Atencao: Envie o arquivo da logo para a raiz do GitHub com o nome 'logo.png' ou 'logo.jpg'.")
 
 st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe_allow_html=True)
-st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMARAO</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
-opcao = st.sidebar.radio("Navegacao", ["Dashboard", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
+opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Dashboard", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
 
 # 1. DASHBOARD
 if opcao == "Dashboard":
-    st.title("Painel Geral de Gestao")
-    st.markdown("Visualizacao rapida do desempenho do seu negocio.")
+    st.title("Painel Geral de Gest\u00e3o")
+    st.markdown("Visualiza\u00e7\u00e3o r\u00e1pida do desempenho do seu neg\u00f3cio.")
     
     conn = sqlite3.connect(DB_FILE)
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
@@ -47,7 +55,7 @@ if opcao == "Dashboard":
     total_clientes = len(df_clientes)
     
     entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum() if not df_fin.empty else 0.0
-    saidas = df_fin[df_fin["tipo"] == "Saida"]["valor"].sum() if not df_fin.empty else 0.0
+    saidas = df_fin[df_fin["tipo"] == "Sa\u00edda"]["valor"].sum() if not df_fin.empty else 0.0
     saldo_caixa = entradas - saidas
     
     col1, col2, col3, col4 = st.columns(4)
@@ -58,9 +66,9 @@ if opcao == "Dashboard":
 
 # 2. CLIENTES
 elif opcao == "Clientes":
-    st.title("Gestao de Clientes")
+    st.title("Gest\u00e3o de Clientes")
     with st.form("form_cliente", clear_on_submit=True):
-        nome = st.text_input("Nome Completo / Razao Social")
+        nome = st.text_input("Nome Completo / Raz\u00e3o Social")
         telefone = st.text_input("Telefone / WhatsApp")
         cidade = st.text_input("Cidade")
         if st.form_submit_button("Cadastrar Cliente"):
@@ -74,7 +82,7 @@ elif opcao == "Clientes":
                 st.success("Cliente cadastrado com sucesso!")
                 st.rerun()
             else:
-                st.warning("O nome e obrigatorio.")
+                st.warning("O nome \u00e9 obrigat\u00f3rio.")
     
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
@@ -91,8 +99,8 @@ elif opcao == "Estoque de Pescados":
     with aba1:
         with st.form("form_cad", clear_on_submit=True):
             nome_p = st.text_input("Nome da Mercadoria")
-            cat_p = st.selectbox("Categoria", ["Peixe Inteiro", "File", "Fruto do Mar", "Bebidas", "Outros"])
-            preco = st.number_input("Preco (R$)", min_value=0.0, format="%.2f")
+            cat_p = st.selectbox("Categoria", ["Peixe Inteiro", "Fil\u00e9", "Fruto do Mar", "Bebidas", "Outros"])
+            preco = st.number_input("Pre\u00e7o (R$)", min_value=0.0, format="%.2f")
             qtd = st.number_input("Quantidade (KG/Unid)", min_value=0.0, format="%.2f")
             if st.form_submit_button("Cadastrar no Estoque"):
                 if nome_p.strip():
@@ -105,7 +113,7 @@ elif opcao == "Estoque de Pescados":
                     st.success("Produto cadastrado com sucesso!")
                     st.rerun()
                 else:
-                    st.warning("O nome do produto e obrigatorio.")
+                    st.warning("O nome do produto \u00e9 obrigat\u00f3rio.")
 
     with aba2:
         st.subheader("Excluir Mercadoria")
@@ -115,7 +123,7 @@ elif opcao == "Estoque de Pescados":
         
         if not df_prod.empty:
             prod_del = st.selectbox("Selecione o produto para DELETAR", df_prod["nome"].tolist())
-            if st.button("Confirmar Exclusao"):
+            if st.button("Confirmar Exclus\u00e3o"):
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 c.execute("DELETE FROM produtos WHERE nome = ?", (prod_del,))
@@ -155,7 +163,7 @@ elif opcao == "Vendas":
             preco_unit = prod_info["preco_kg"]
             valor_calculado = qtd_kg * preco_unit
             
-            st.info(f"Preco Unitario: R$ {preco_unit:.2f} | Total: R$ {valor_calculado:.2f}")
+            st.info(f"Pre\u00e7o Unit\u00e1rio: R$ {preco_unit:.2f} | Total: R$ {valor_calculado:.2f}")
             
             if st.form_submit_button("Finalizar Venda"):
                 if qtd_kg > prod_info["estoque_kg"]:
@@ -179,10 +187,10 @@ elif opcao == "Vendas":
 elif opcao == "Financeiro":
     st.title("Controle Financeiro / Caixa")
     with st.form("form_fin", clear_on_submit=True):
-        desc = st.text_input("Descricao")
-        tipo = st.selectbox("Tipo", ["Entrada", "Saida"])
+        desc = st.text_input("Descri\u00e7\u00e3o")
+        tipo = st.selectbox("Tipo", ["Entrada", "Sa\u00edda"])
         valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
-        if st.form_submit_button("Registrar Movimentacao"):
+        if st.form_submit_button("Registrar Movimenta\u00e7\u00e3o"):
             if desc.strip():
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
@@ -190,10 +198,10 @@ elif opcao == "Financeiro":
                           (desc, tipo, valor, datetime.now().strftime("%Y-%m-%d %H:%M")))
                 conn.commit()
                 conn.close()
-                st.success("Lancamento registrado!")
+                st.success("Lan\u00e7amento registrado!")
                 st.rerun()
             else:
-                st.warning("A descricao e obrigatoria.")
+                st.warning("A descri\u00e7\u00e0o \u00e9 obrigat\u00f3ria.")
                 
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
@@ -203,4 +211,5 @@ elif opcao == "Financeiro":
         st.dataframe(df_fin, use_container_width=True)
     else:
         st.info("Nenhum movimento financeiro.")
-    
+
+  
