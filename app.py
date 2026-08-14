@@ -78,9 +78,6 @@ elif opcao == "Fornecedores":
         if submit:
             st.success(f"Fornecedor {nome} registrado!")
 
-elif menu == "Estoque":
-    # ... (o restante do seu código) ...
-
 
 # 3. CLIENTES
 elif opcao == "Clientes":
