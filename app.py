@@ -37,7 +37,7 @@ st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe
 st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
-opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Clientes", "Estoque", "Vendas", "Financeiro", "Normas" ])
+opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Fornecedores", "Clientes", "Estoque", "Vendas", "Financeiro", "Normas" ])
 
 # 1. DASHBOARD
 if opcao == "Painel Geral":
@@ -64,7 +64,25 @@ if opcao == "Painel Geral":
     col3.metric("Clientes Cadastrados", f"{total_clientes}")
     col4.metric("Saldo do Caixa", f"R$ {saldo_caixa:,.2f}")
 
-# 2. CLIENTES
+# 2. FORNECEDORES
+elif opcao == "Fornecedores":
+    st.title("Gestão de Fornecedores")
+    st.write("Controle de parceiros e contatos comerciais.")
+    
+    with st.form("form_fornecedor"):
+        nome = st.text_input("Nome do Fornecedor")
+        contato = st.text_input("Telefone ou E-mail")
+        categoria = st.selectbox("Categoria", ["Embalagens", "Insumos", "Limpeza", "Outros"])
+        submit = st.form_submit_button("Cadastrar")
+        
+        if submit:
+            st.success(f"Fornecedor {nome} registrado!")
+
+elif menu == "Estoque":
+    # ... (o restante do seu código) ...
+
+
+# 3. CLIENTES
 elif opcao == "Clientes":
     st.title("Gest\u00e3o de Clientes")
     with st.form("form_cliente", clear_on_submit=True):
@@ -90,7 +108,7 @@ elif opcao == "Clientes":
     conn.close()
     st.dataframe(df_c, use_container_width=True)
 
-# 3. ESTOQUE DE PESCADOS
+# 4. ESTOQUE DE PESCADOS
 elif opcao == "Estoque":
     st.title("Controle de Estoque e Mercadorias")
     
@@ -140,7 +158,7 @@ elif opcao == "Estoque":
     conn.close()
     st.dataframe(df_full, use_container_width=True)
 
-# 4. VENDAS
+# 5. VENDAS
 elif opcao == "Vendas":
     st.title("Registrar Venda")
     conn = sqlite3.connect(DB_FILE)
@@ -183,7 +201,7 @@ elif opcao == "Vendas":
                     st.success("Venda registrada com sucesso!")
                     st.rerun()
 
-# 5. FINANCEIRO
+# 6. FINANCEIRO
 elif opcao == "Financeiro":
     st.title("Controle Financeiro / Caixa")
     with st.form("form_fin", clear_on_submit=True):
