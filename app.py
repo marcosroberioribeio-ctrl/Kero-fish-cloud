@@ -212,7 +212,7 @@ elif opcao == "Financeiro":
     else:
         st.info("Nenhum movimento financeiro.")
 
-   elif opcao == "Normas":
+elif opcao == "Normas":
     st.title("Normas e Boas Práticas")
     st.subheader("Segurança e Qualidade - BPF")
     st.markdown("""
