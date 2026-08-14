@@ -23,7 +23,7 @@ init_db()
 
 # Logo Automatica (Procura PNG ou JPG na raiz do repositorio)
 logo_encontrada = None
-for ext in ["png", "jpg", "jpeg", "PNG", "JPG"]:
+for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "jpg.jpg"]:
     if os.path.exists(f"logo.{ext}"):
         logo_encontrada = f"logo.{ext}"
         break
