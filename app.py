@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -20,14 +19,14 @@ def init_db():
 
 init_db()
 
-# Logo e Slogan
+# Logo e Slogan da Empresa (PEIXE E CAMARAO)
 try:
     st.sidebar.image("logo.png", use_column_width=True)
 except:
     pass
 
 st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe_allow_html=True)
-st.sidebar.markdown("<p style='text-align: center; font-style: italic;'>O melhor pescado da regiao!</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMARAO</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
 opcao = st.sidebar.radio("Navegacao", ["Dashboard", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
@@ -204,4 +203,4 @@ elif opcao == "Financeiro":
         st.dataframe(df_fin, use_container_width=True)
     else:
         st.info("Nenhum movimento financeiro.")
-
+    
