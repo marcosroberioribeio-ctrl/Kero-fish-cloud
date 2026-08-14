@@ -37,7 +37,7 @@ st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe
 st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
-opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
+opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
 
 # 1. DASHBOARD
 if opcao == "Dashboard":
