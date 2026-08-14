@@ -204,4 +204,4 @@ elif opcao == "Financeiro":
         st.dataframe(df_fin, use_container_width=True)
     else:
         st.info("Nenhum movimento financeiro.")
-Yahoo Mail: Pesquise, organize e aumente sua produtividade
+
