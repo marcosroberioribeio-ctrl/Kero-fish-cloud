@@ -40,7 +40,7 @@ st.sidebar.markdown("---")
 opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel", "Clientes", "Estoque de Pescados", "Vendas", "Financeiro"])
 
 # 1. DASHBOARD
-if opcao == "Dashboard":
+if opcao == "Painel":
     st.title("Painel Geral de Gest\u00e3o")
     st.markdown("Visualiza\u00e7\u00e3o r\u00e1pida do desempenho do seu neg\u00f3cio.")
     
