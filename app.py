@@ -37,7 +37,7 @@ st.sidebar.markdown("<h3 style='text-align: center;'>Kero Fish ERP</h3>", unsafe
 st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
 st.sidebar.markdown("---")
 
-opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Clientes", "Estoque", "Vendas", "Financeiro"])
+opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Clientes", "Estoque", "Vendas", "Financeiro", "Normas" ])
 
 # 1. DASHBOARD
 if opcao == "Painel Geral":
@@ -212,4 +212,13 @@ elif opcao == "Financeiro":
     else:
         st.info("Nenhum movimento financeiro.")
 
-  
+   elif opcao == "Normas":
+    st.title("Normas e Boas Práticas")
+    st.subheader("Segurança e Qualidade - BPF")
+    st.markdown("""
+    Para garantir a segurança de todos os produtos, seguimos rigorosamente:
+    * **Higiene Pessoal:** Lavagem obrigatória das mãos e uso de proteção.
+    * **Limpeza:** Desinfecção diária de todas as superfícies de contato.
+    * **Temperatura:** Manter o controle rigoroso da cadeia de frio.
+    * **Organização:** Armazenamento correto para evitar contaminação cruzada.
+    """)
