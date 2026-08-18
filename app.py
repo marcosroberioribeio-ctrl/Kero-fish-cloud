@@ -37,7 +37,7 @@ else:
 # st.sidebar.markdown("<p style='text-align: center; font-weight: bold; color: #ff6600;'>PEIXE E CAMAR\u00c3O</p>", unsafe_allow_html=True)
 # st.sidebar.markdown("---")
 
-opcao = st.sidebar.radio("Navega\u00e7\u00e3o", ["Painel Geral", "Fornecedores", "Clientes", "Estoque", "Vendas", "Financeiro", "Normas" ])
+opcao = st.sidebar.radio("Navegação", ["Painel Geral", "Fornecedores", "Compras de produtos", "Despesas Gerais", "Clientes", "Estoque", "Vendas", "Financeiro", "Normas"])
 
 # 1. DASHBOARD
 if opcao == "Painel Geral":
@@ -77,9 +77,17 @@ elif opcao == "Fornecedores":
         
         if submit:
             st.success(f"Fornecedor {nome} registrado!")
+# 3. COMPRAS GERAIS
+elif opcao == "Compras de produtos":
+    st.title("Compras de Produtos")
+    st.write("Aqui vocÃª poderÃ¡ registrar as entradas de mercadorias.")
 
+# 4. DESPESAS GERAIS
+elif opcao == "Despesas Gerais":
+    st.title("Despesas Gerais")
+    st.write("Aqui vocÃª poderÃ¡ controlar seus gastos operacionais.")
 
-# 3. CLIENTES
+# 5. CLIENTES
 elif opcao == "Clientes":
     st.title("Gest\u00e3o de Clientes")
     with st.form("form_cliente", clear_on_submit=True):
@@ -105,7 +113,7 @@ elif opcao == "Clientes":
     conn.close()
     st.dataframe(df_c, use_container_width=True)
 
-# 4. ESTOQUE DE PESCADOS
+# 6. ESTOQUE DE PESCADOS
 elif opcao == "Estoque":
     st.title("Controle de Estoque e Mercadorias")
     
@@ -155,7 +163,7 @@ elif opcao == "Estoque":
     conn.close()
     st.dataframe(df_full, use_container_width=True)
 
-# 5. VENDAS
+# 7. VENDAS
 elif opcao == "Vendas":
     st.title("Registrar Venda")
     conn = sqlite3.connect(DB_FILE)
@@ -198,7 +206,7 @@ elif opcao == "Vendas":
                     st.success("Venda registrada com sucesso!")
                     st.rerun()
 
-# 6. FINANCEIRO
+# 8. FINANCEIRO
 elif opcao == "Financeiro":
     st.title("Controle Financeiro / Caixa")
     with st.form("form_fin", clear_on_submit=True):
@@ -227,6 +235,12 @@ elif opcao == "Financeiro":
     else:
         st.info("Nenhum movimento financeiro.")
 
+# 8. RELATORIOS
+elif opcao == "RelatÃ³rios":
+    st.title("RelatÃ³rios e AnÃ¡lises")
+    st.write("Aqui vocÃª poderÃ¡ gerar e visualizar relatÃ³rios consolidados da empresa.")
+
+# 9. NORMAS
 elif opcao == "Normas":
     st.title("Normas e Boas Práticas")
     st.subheader("Segurança e Qualidade - BPF")
