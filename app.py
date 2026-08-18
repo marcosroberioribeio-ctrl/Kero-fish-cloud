@@ -9,7 +9,7 @@ FILE_PATH = "KERO FISH_Financeira_Completa_Preenchida-4.xlsx"
 @st.cache_data
 def load_data():
     # Lê a planilha do Excel diretamente
-    return pd.read_excel(FILE_PATH)
+    return pd.read_excel(FILE_PATH, header=1)
 
 st.title("🐟 Kero Fish - Sistema Financeiro")
 
