@@ -7,7 +7,7 @@ from datetime import datetime
 
 st.set_page_config(page_title="Kero Fish ERP", layout="wide")
 
-DB_FILE = "kerofish.db"
+DB_FILE = "kero_fish.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
