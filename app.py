@@ -299,3 +299,50 @@ elif opcao == "Relatórios":
     df_d = pd.read_sql_query("SELECT * FROM despesas", conn)
     conn.close()
     st.subheader("Compras")
+
+# --- PAINEL DE VISUALIZAÇÃO GERAL (DADOS MIGRADOS) ---
+    st.markdown("---")
+    st.header("📊 Dados Históricos da Planilha")
+
+    # Criando as abas para visualização das tabelas migradas
+    aba_v, aba_c, aba_d, aba_cli = st.tabs(["📊 Vendas", "🛒 Compras", "💸 Despesas", "👥 Clientes"])
+
+    with aba_v:
+        st.subheader("Histórico de Vendas")
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
+            conn.close()
+            st.dataframe(df_vendas, use_container_width=True)
+        except Exception as e:
+            st.info("Nenhuma tabela de vendas encontrada.")
+
+    with aba_c:
+        st.subheader("Histórico de Compras")
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
+            conn.close()
+            st.dataframe(df_compras, use_container_width=True)
+        except Exception as e:
+            st.info("Nenhuma tabela de compras encontrada.")
+
+    with aba_d:
+        st.subheader("Histórico de Despesas")
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
+            conn.close()
+            st.dataframe(df_despesas, use_container_width=True)
+        except Exception as e:
+            st.info("Nenhuma tabela de despesas encontrada.")
+
+    with aba_cli:
+        st.subheader("Cadastro de Clientes")
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            df_clientes = pd.read_sql_query("SELECT * FROM clientes", conn)
+            conn.close()
+            st.dataframe(df_clientes, use_container_width=True)
+        except Exception as e:
+            st.info("Nenhuma tabela de clientes encontrada.")
