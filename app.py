@@ -37,7 +37,7 @@ else:
 
 # MENU LATERAL
 opcao = st.sidebar.radio(
-    "NavegaÃ§Ã£o", 
+    "Navegação", 
     [
         "Painel Geral", 
         "Fornecedores", 
@@ -47,15 +47,15 @@ opcao = st.sidebar.radio(
         "Vendas", 
         "Financeiro", 
         "Despesas Gerais", 
-        "RelatÃ³rios", 
+        "Relatórios", 
         "Normas"
     ]
 )
 
 # 1. DASHBOARD
 if opcao == "Painel Geral":
-    st.title("Painel Geral de GestÃ£o")
-    st.markdown("VisualizaÃ§Ã£o rÃ¡pida do desempenho do seu negÃ³cio.")
+    st.title("Painel Geral de Gestão")
+    st.markdown("Visualização rápida do desempenho do seu negócio.")
     
     conn = sqlite3.connect(DB_FILE)
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
@@ -68,7 +68,7 @@ if opcao == "Painel Geral":
     total_clientes = len(df_clientes)
     
     entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum() if not df_fin.empty else 0.0
-    saidas = df_fin[df_fin["tipo"] == "SaÃ­da"]["valor"].sum() if not df_fin.empty else 0.0
+    saidas = df_fin[df_fin["tipo"] == "Saída"]["valor"].sum() if not df_fin.empty else 0.0
     saldo_caixa = entradas - saidas
     
     col1, col2, col3, col4 = st.columns(4)
@@ -79,7 +79,7 @@ if opcao == "Painel Geral":
 
 # 2. FORNECEDORES
 elif opcao == "Fornecedores":
-    st.title("GestÃ£o de Fornecedores")
+    st.title("Gestão de Fornecedores")
     st.write("Controle de parceiros e contatos comerciais.")
     
     with st.form("form_fornecedor"):
@@ -112,7 +112,7 @@ elif opcao == "Compras de produtos":
                 c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)", 
                           (prod, qtd, val, hoje))
                 c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", 
-                          (f"Compra: {prod}", "SaÃ­da", val, hoje))
+                          (f"Compra: {prod}", "Saída", val, hoje))
                 c.execute("UPDATE produtos SET estoque_kg = estoque_kg + ? WHERE nome = ?", (qtd, prod))
                 conn.commit()
                 conn.close()
@@ -129,8 +129,8 @@ elif opcao == "Estoque":
     with aba1:
         with st.form("form_cad", clear_on_submit=True):
             nome_p = st.text_input("Nome da Mercadoria")
-            cat_p = st.selectbox("Categoria", ["Peixe Inteiro", "FilÃ©", "Fruto do Mar", "Bebidas", "Outros"])
-            preco = st.number_input("PreÃ§o (R$)", min_value=0.0, format="%.2f")
+            cat_p = st.selectbox("Categoria", ["Peixe Inteiro", "Filé", "Fruto do Mar", "Bebidas", "Outros"])
+            preco = st.number_input("Preço (R$)", min_value=0.0, format="%.2f")
             qtd = st.number_input("Quantidade (KG/Unid)", min_value=0.0, format="%.2f")
             if st.form_submit_button("Cadastrar no Estoque"):
                 if nome_p.strip():
@@ -143,7 +143,7 @@ elif opcao == "Estoque":
                     st.success("Produto cadastrado com sucesso!")
                     st.rerun()
                 else:
-                    st.warning("O nome do produto Ã© obrigatÃ³rio.")
+                    st.warning("O nome do produto é obrigatório.")
 
     with aba2:
         st.subheader("Excluir Mercadoria")
@@ -152,7 +152,7 @@ elif opcao == "Estoque":
         conn.close()
         if not df_prod.empty:
             prod_del = st.selectbox("Selecione o produto para DELETAR", df_prod["nome"].tolist())
-            if st.button("Confirmar ExclusÃ£o"):
+            if st.button("Confirmar Exclusão"):
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 c.execute("DELETE FROM produtos WHERE nome = ?", (prod_del,))
@@ -171,9 +171,9 @@ elif opcao == "Estoque":
 
 # 5. CLIENTES
 elif opcao == "Clientes":
-    st.title("GestÃ£o de Clientes")
+    st.title("Gestão de Clientes")
     with st.form("form_cliente", clear_on_submit=True):
-        nome = st.text_input("Nome Completo / RazÃ£o Social")
+        nome = st.text_input("Nome Completo / Razão Social")
         telefone = st.text_input("Telefone / WhatsApp")
         cidade = st.text_input("Cidade")
         if st.form_submit_button("Cadastrar Cliente"):
@@ -187,7 +187,7 @@ elif opcao == "Clientes":
                 st.success("Cliente cadastrado com sucesso!")
                 st.rerun()
             else:
-                st.warning("O nome Ã© obrigatÃ³rio.")
+                st.warning("O nome é obrigatório.")
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
     df_c = pd.read_sql_query("SELECT * FROM clientes", conn)
@@ -214,7 +214,7 @@ elif opcao == "Vendas":
             prod_info = df_p[df_p["nome"] == produto_sel].iloc[0]
             preco_unit = prod_info["preco_kg"]
             valor_calculado = qtd_kg * preco_unit
-            st.info(f"PreÃ§o UnitÃ¡rio: R$ {preco_unit:.2f} | Total: R$ {valor_calculado:.2f}")
+            st.info(f"Preço Unitário: R$ {preco_unit:.2f} | Total: R$ {valor_calculado:.2f}")
             
             if st.form_submit_button("Finalizar Venda"):
                 if qtd_kg > prod_info["estoque_kg"]:
@@ -237,10 +237,10 @@ elif opcao == "Vendas":
 elif opcao == "Financeiro":
     st.title("Controle Financeiro / Caixa")
     with st.form("form_fin", clear_on_submit=True):
-        desc = st.text_input("DescriÃ§Ã£o")
-        tipo = st.selectbox("Tipo", ["Entrada", "SaÃ­da"])
+        desc = st.text_input("Descrição")
+        tipo = st.selectbox("Tipo", ["Entrada", "Saída"])
         valor = st.number_input("Valor (R$)", min_value=0.01, format="%.2f")
-        if st.form_submit_button("Registrar MovimentaÃ§Ã£o"):
+        if st.form_submit_button("Registrar Movimentação"):
             if desc.strip():
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
@@ -248,10 +248,10 @@ elif opcao == "Financeiro":
                           (desc, tipo, valor, datetime.now().strftime("%Y-%m-%d %H:%M")))
                 conn.commit()
                 conn.close()
-                st.success("LanÃ§amento registrado!")
+                st.success("Lançamento registrado!")
                 st.rerun()
             else:
-                st.warning("A descriÃ§Ã£o Ã© obrigatÃ³ria.")
+                st.warning("A descrição é obrigatória.")
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
     df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
@@ -265,9 +265,9 @@ elif opcao == "Financeiro":
 elif opcao == "Despesas Gerais":
     st.title("Controle de Despesas Gerais")
     with st.form("form_despesa", clear_on_submit=True):
-        desc_esp = st.text_input("DescriÃ§Ã£o da Despesa")
+        desc_esp = st.text_input("Descrição da Despesa")
         val_esp = st.number_input("Valor da Despesa (R$)", min_value=0.01, format="%.2f")
-        if st.form_submit_button("LanÃ§ar Despesa"):
+        if st.form_submit_button("Lançar Despesa"):
             if desc_esp.strip():
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
@@ -275,13 +275,13 @@ elif opcao == "Despesas Gerais":
                 c.execute("INSERT INTO despesas (descricao, valor, data_despesa) VALUES (?, ?, ?)", 
                           (desc_esp, val_esp, hoje))
                 c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", 
-                          (f"Despesa: {desc_esp}", "SaÃ­da", val_esp, hoje))
+                          (f"Despesa: {desc_esp}", "Saída", val_esp, hoje))
                 conn.commit()
                 conn.close()
-                st.success("Despesa lanÃ§ada no caixa!")
+                st.success("Despesa lançada no caixa!")
                 st.rerun()
             else:
-                st.warning("A descriÃ§Ã£o Ã© obrigatÃ³ria.")
+                st.warning("A descrição é obrigatória.")
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
     df_d = pd.read_sql_query("SELECT * FROM despesas", conn)
@@ -291,9 +291,9 @@ elif opcao == "Despesas Gerais":
     else:
         st.info("Nenhuma despesa registrada.")
 
-# 9. RELATÃ“RIOS
-elif opcao == "RelatÃ³rios":
-    st.title("RelatÃ³rios do Sistema")
+# 9. RELATÓRIOS
+elif opcao == "Relatórios":
+    st.title("Relatórios do Sistema")
     conn = sqlite3.connect(DB_FILE)
     df_c = pd.read_sql_query("SELECT * FROM compras", conn)
     df_d = pd.read_sql_query("SELECT * FROM despesas", conn)
