@@ -298,4 +298,4 @@ elif opcao == "Relatórios":
     df_c = pd.read_sql_query("SELECT * FROM compras", conn)
     df_d = pd.read_sql_query("SELECT * FROM despesas", conn)
     conn.close()
-    st.subheader("Compras
+    st.subheader("Compras")
