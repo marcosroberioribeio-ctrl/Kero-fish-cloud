@@ -35,7 +35,7 @@ if logo_encontrada:
 else:
     st.sidebar.warning("Atencao: Envie o arquivo da logo para a raiz do GitHub com o nome 'logo.png' ou 'logo.jpg'.")
 
-# MENU LATERAL COM TODOS OS ITENS
+# MENU LATERAL
 opcao = st.sidebar.radio(
     "NavegaÃ§Ã£o", 
     [
@@ -94,47 +94,36 @@ elif opcao == "Fornecedores":
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
     st.title("Compras de Produtos")
-    st.write("Registre as entradas de mercadorias e repasse automÃ¡tico para o estoque/financeiro.")
     
     conn = sqlite3.connect(DB_FILE)
-    df_p = pd.read_sql_query("SELECT id, nome, estoque_kg FROM produtos", conn)
+    df_p = pd.read_sql_query("SELECT nome FROM produtos", conn)
     conn.close()
-    
     lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
-    
-    if not lista_produtos:
-        st.warning("Cadastre produtos previamente no menu 'Estoque' para registrar compras.")
-    else:
-        with st.form("form_compra", clear_on_submit=True):
-            prod_sel = st.selectbox("Produto", lista_produtos)
-            qtd_compra = st.number_input("Quantidade Comprada (KG/Unid)", min_value=0.1, format="%.2f")
-            valor_total_compra = st.number_input("Valor Total da Compra (R$)", min_value=0.01, format="%.2f")
-            
-            if st.form_submit_button("Registrar Compra"):
+
+    with st.form("form_compra", clear_on_submit=True):
+        prod = st.selectbox("Produto", lista_produtos)
+        qtd = st.number_input("Quantidade", min_value=0.1)
+        val = st.number_input("Valor Total R$", min_value=0.0)
+        if st.form_submit_button("Registrar Compra"):
+            if prod:
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                hoje = datetime.now().strftime("%Y-%m-%d %H:%M")
-                
-                c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
-                          (prod_sel, qtd_compra, valor_total_compra, hoje))
-                
-                prod_atual = c.execute("SELECT estoque_kg FROM produtos WHERE nome = ?", (prod_sel,)).fetchone()
-                if prod_atual:
-                    novo_est = prod_atual[0] + qtd_compra
-                    c.execute("UPDATE produtos SET estoque_kg = ? WHERE nome = ?", (novo_est, prod_sel))
-                
-                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
-                          (f"Compra: {prod_sel}", "SaÃ­da", valor_total_compra, hoje))
-                
+                hoje = datetime.now().strftime("%Y-%m-%d")
+                c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)", 
+                          (prod, qtd, val, hoje))
+                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", 
+                          (f"Compra: {prod}", "SaÃ­da", val, hoje))
+                c.execute("UPDATE produtos SET estoque_kg = estoque_kg + ? WHERE nome = ?", (qtd, prod))
                 conn.commit()
                 conn.close()
-                st.success("Compra registrada, estoque atualizado e lanÃ§amento efetuado no caixa!")
+                st.success("Compra registrada e estoque atualizado!")
                 st.rerun()
+            else:
+                st.warning("Cadastre o produto no estoque primeiro.")
 
-# 4. ESTOQUE
+# 4. ESTOQUE DE PESCADOS
 elif opcao == "Estoque":
     st.title("Controle de Estoque e Mercadorias")
-    
     aba1, aba2 = st.tabs(["Cadastrar", "Excluir Produto"])
     
     with aba1:
@@ -159,9 +148,8 @@ elif opcao == "Estoque":
     with aba2:
         st.subheader("Excluir Mercadoria")
         conn = sqlite3.connect(DB_FILE)
-        df_prod = pd.read_sql_query("SELECT id, nome FROM produtos", conn)
+        df_prod = pd.read_sql_query("SELECT nome FROM produtos", conn)
         conn.close()
-        
         if not df_prod.empty:
             prod_del = st.selectbox("Selecione o produto para DELETAR", df_prod["nome"].tolist())
             if st.button("Confirmar ExclusÃ£o"):
@@ -200,7 +188,6 @@ elif opcao == "Clientes":
                 st.rerun()
             else:
                 st.warning("O nome Ã© obrigatÃ³rio.")
-    
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
     df_c = pd.read_sql_query("SELECT * FROM clientes", conn)
@@ -214,7 +201,6 @@ elif opcao == "Vendas":
     df_c = pd.read_sql_query("SELECT nome FROM clientes", conn)
     df_p = pd.read_sql_query("SELECT id, nome, preco_kg, estoque_kg FROM produtos", conn)
     conn.close()
-    
     lista_clientes = df_c["nome"].tolist() if not df_c.empty else []
     lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
     
@@ -225,11 +211,9 @@ elif opcao == "Vendas":
             cliente_sel = st.selectbox("Cliente", lista_clientes)
             produto_sel = st.selectbox("Produto", lista_produtos)
             qtd_kg = st.number_input("Quantidade (KG/Unid)", min_value=0.1, format="%.2f")
-            
             prod_info = df_p[df_p["nome"] == produto_sel].iloc[0]
             preco_unit = prod_info["preco_kg"]
             valor_calculado = qtd_kg * preco_unit
-            
             st.info(f"PreÃ§o UnitÃ¡rio: R$ {preco_unit:.2f} | Total: R$ {valor_calculado:.2f}")
             
             if st.form_submit_button("Finalizar Venda"):
@@ -241,8 +225,7 @@ elif opcao == "Vendas":
                     hoje = datetime.now().strftime("%Y-%m-%d %H:%M")
                     c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
                               (cliente_sel, produto_sel, qtd_kg, valor_calculado, hoje))
-                    novo_estoque = prod_info["estoque_kg"] - qtd_kg
-                    c.execute("UPDATE produtos SET estoque_kg = ? WHERE id = ?", (novo_estoque, prod_info["id"]))
+                    c.execute("UPDATE produtos SET estoque_kg = estoque_kg - ? WHERE id = ?", (qtd_kg, prod_info["id"]))
                     c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
                               (f"Venda: {produto_sel} ({cliente_sel})", "Entrada", valor_calculado, hoje))
                     conn.commit()
@@ -269,7 +252,6 @@ elif opcao == "Financeiro":
                 st.rerun()
             else:
                 st.warning("A descriÃ§Ã£o Ã© obrigatÃ³ria.")
-                
     st.markdown("---")
     conn = sqlite3.connect(DB_FILE)
     df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
@@ -283,14 +265,37 @@ elif opcao == "Financeiro":
 elif opcao == "Despesas Gerais":
     st.title("Controle de Despesas Gerais")
     with st.form("form_despesa", clear_on_submit=True):
-        desc_esp = st.text_input("DescriÃ§Ã£o da Despesa (ex: Conta de Luz, Aluguel)")
-        valor_esp = st.number_input("Valor da Despesa (R$)", min_value=0.01, format="%.2f")
-        
+        desc_esp = st.text_input("DescriÃ§Ã£o da Despesa")
+        val_esp = st.number_input("Valor da Despesa (R$)", min_value=0.01, format="%.2f")
         if st.form_submit_button("LanÃ§ar Despesa"):
             if desc_esp.strip():
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
-                hoje = datetime.now().strftime("%Y-%m-%d %H:%M")
-                
-                # Registra na tabela prÃ³pria de despesas
-                c.execute("INSERT INTO despesas (descricao, valor, data_despes
+                hoje = datetime.now().strftime("%Y-%m-%d")
+                c.execute("INSERT INTO despesas (descricao, valor, data_despesa) VALUES (?, ?, ?)", 
+                          (desc_esp, val_esp, hoje))
+                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", 
+                          (f"Despesa: {desc_esp}", "SaÃ­da", val_esp, hoje))
+                conn.commit()
+                conn.close()
+                st.success("Despesa lanÃ§ada no caixa!")
+                st.rerun()
+            else:
+                st.warning("A descriÃ§Ã£o Ã© obrigatÃ³ria.")
+    st.markdown("---")
+    conn = sqlite3.connect(DB_FILE)
+    df_d = pd.read_sql_query("SELECT * FROM despesas", conn)
+    conn.close()
+    if not df_d.empty:
+        st.dataframe(df_d, use_container_width=True)
+    else:
+        st.info("Nenhuma despesa registrada.")
+
+# 9. RELATÃ“RIOS
+elif opcao == "RelatÃ³rios":
+    st.title("RelatÃ³rios do Sistema")
+    conn = sqlite3.connect(DB_FILE)
+    df_c = pd.read_sql_query("SELECT * FROM compras", conn)
+    df_d = pd.read_sql_query("SELECT * FROM despesas", conn)
+    conn.close()
+    st.subheader("Compras
