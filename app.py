@@ -205,26 +205,29 @@ elif opcao == "Clientes":
     conn.close()
     st.dataframe(df_c, use_container_width=True)
 
-# 6. VENDAS
+# 6. VENDAS (Desvinculado do cadastro de clientes)
 elif opcao == "Vendas":
     st.title("Registrar Venda")
     conn = sqlite3.connect(DB_FILE)
-    df_c = pd.read_sql_query("SELECT nome FROM clientes", conn)
+    # Buscamos apenas os produtos do estoque
     df_p = pd.read_sql_query("SELECT id, nome, preco_kg, estoque_kg FROM produtos", conn)
     conn.close()
-    lista_clientes = df_c["nome"].tolist() if not df_c.empty else []
+    
     lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
     
-    if not lista_clientes or not lista_produtos:
-        st.warning("Cadastre pelo menos 1 Cliente e 1 Produto no Estoque para registrar vendas.")
+    if not lista_produtos:
+        st.warning("Cadastre pelo menos 1 Produto no Estoque para registrar vendas.")
     else:
         with st.form("form_venda", clear_on_submit=True):
-            cliente_sel = st.selectbox("Cliente", lista_clientes)
+            # Campo de texto livre, sem obrigatoriedade de estar na base de clientes
+            cliente_nome = st.text_input("Nome do Cliente (Opcional)")
             produto_sel = st.selectbox("Produto", lista_produtos)
             qtd_kg = st.number_input("Quantidade (KG/Unid)", min_value=0.1, format="%.2f")
+            
             prod_info = df_p[df_p["nome"] == produto_sel].iloc[0]
             preco_unit = prod_info["preco_kg"]
             valor_calculado = qtd_kg * preco_unit
+            
             st.info(f"Preço Unitário: R$ {preco_unit:.2f} | Total: R$ {valor_calculado:.2f}")
             
             if st.form_submit_button("Finalizar Venda"):
@@ -234,15 +237,19 @@ elif opcao == "Vendas":
                     conn = sqlite3.connect(DB_FILE)
                     c = conn.cursor()
                     hoje = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    # Se o nome estiver vazio, gravamos como "Cliente Balcão"
+                    cliente_final = cliente_nome if cliente_nome.strip() else "Cliente Balcão"
+                    
                     c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                              (cliente_sel, produto_sel, qtd_kg, valor_calculado, hoje))
+                              (cliente_final, produto_sel, qtd_kg, valor_calculado, hoje))
                     c.execute("UPDATE produtos SET estoque_kg = estoque_kg - ? WHERE id = ?", (qtd_kg, prod_info["id"]))
                     c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
-                              (f"Venda: {produto_sel} ({cliente_sel})", "Entrada", valor_calculado, hoje))
+                              (f"Venda: {produto_sel} ({cliente_final})", "Entrada", valor_calculado, hoje))
                     conn.commit()
                     conn.close()
-                    st.success("Venda registrada com sucesso!")
+                    st.success(f"Venda para {cliente_final} registrada com sucesso!")
                     st.rerun()
+         
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
