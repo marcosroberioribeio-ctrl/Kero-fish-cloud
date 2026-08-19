@@ -56,7 +56,7 @@ opcao = st.sidebar.radio(
     ]
 )
 
-# 1. DASHBOARD
+# 1. PAINEL GERAL
 if opcao == "Painel Geral":
     st.title("Painel Geral de Gestão")
     
@@ -74,7 +74,12 @@ if opcao == "Painel Geral":
     col1.metric("Faturamento Vendas", f"R$ {total_faturado:,.2f}")
     col2.metric("Total Vendas", f"{len(df_vendas)}")
     col3.metric("Clientes", f"{len(df_clientes)}")
-    col4.metric("Saldo Caixa", f"R$ {entradas - saídas:,.2f}")
+    col4.metric("Saldo Caixa", f"R$ {entradas - saidas:,.2f}")
+
+# 2. FORNECEDORES
+elif opcao == "Fornecedores":
+    st.title("Gestão de Fornecedores")
+    st.info("Módulo de Fornecedores ativo.")
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
@@ -123,6 +128,29 @@ elif opcao == "Estoque":
     conn.close()
     st.dataframe(df_full, use_container_width=True)
 
+# 5. CLIENTES
+elif opcao == "Clientes":
+    st.title("Cadastro e Gestão de Clientes")
+    with st.form("form_cliente", clear_on_submit=True):
+        nome_cli = st.text_input("Nome do Cliente")
+        tel_cli = st.text_input("Telefone")
+        cidade_cli = st.text_input("Cidade")
+        if st.form_submit_button("Cadastrar Cliente"):
+            if nome_cli:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                hoje = datetime.now().strftime("%Y-%m-%d")
+                c.execute("INSERT INTO clientes (nome, telefone, cidade, data_cad) VALUES (?, ?, ?, ?)", (nome_cli, tel_cli, cidade_cli, hoje))
+                conn.commit()
+                conn.close()
+                st.success("Cliente cadastrado com sucesso!")
+            else:
+                st.error("O nome do cliente é obrigatório.")
+    conn = sqlite3.connect(DB_FILE)
+    df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
+    conn.close()
+    st.dataframe(df_cli, use_container_width=True)
+
 # 6. VENDAS
 elif opcao == "Vendas":
     st.title("Registrar Venda")
@@ -154,32 +182,79 @@ elif opcao == "Vendas":
                     st.success("Venda realizada com sucesso!")
                     st.rerun()
 
-# IMPORTAR PLANILHA
+# 7. FINANCEIRO
+elif opcao == "Financeiro":
+    st.title("Controle Financeiro (Entradas e Saídas)")
+    conn = sqlite3.connect(DB_FILE)
+    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn.close()
+    st.dataframe(df_fin, use_container_width=True)
+
+# 8. DESPESAS GERAIS
+elif opcao == "Despesas Gerais":
+    st.title("Registro de Despesas Gerais")
+    with st.form("form_despesa", clear_on_submit=True):
+        desc_esp = st.text_input("Descrição da Despesa")
+        val_esp = st.number_input("Valor R$", min_value=0.0)
+        if st.form_submit_button("Registrar Despesa"):
+            if desc_esp and val_esp > 0:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                hoje = datetime.now().strftime("%Y-%m-%d")
+                c.execute("INSERT INTO despesas (descricao, valor, data_despesa) VALUES (?, ?, ?)", (desc_esp, val_esp, hoje))
+                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc_esp}", "Saída", val_esp, hoje))
+                conn.commit()
+                conn.close()
+                st.success("Despesa registrada com sucesso!")
+            else:
+                st.error("Preencha a descrição e o valor corretamente.")
+    conn = sqlite3.connect(DB_FILE)
+    df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
+    conn.close()
+    st.dataframe(df_esp, use_container_width=True)
+
+# 9. RELATÓRIOS
+elif opcao == "Relatórios":
+    st.title("Relatórios do Sistema")
+    st.info("Módulo de relatórios gerenciais.")
+
+# 10. NORMAS
+elif opcao == "Normas":
+    st.title("Normas e Procedimentos")
+    st.info("Documentação interna e normas operacionais.")
+
+# 11. IMPORTAR PLANILHA
 elif opcao == "Importar Planilha":
-    st.title("Importação de Dados")
-    if st.button("Confirmar Importação"):
+    st.title("Importação de Dados da Planilha Antiga")
+    st.write("Certifique-se de que o arquivo `KERO FISH_Financeira_Completa_Preenchida-4.xlsx` está enviado na raiz do projeto no GitHub.")
+    
+    if st.button("Confirmar Importação de Vendas e Compras"):
         try:
             conn = sqlite3.connect(DB_FILE)
             c = conn.cursor()
             
             # Importar Vendas
-            df_v = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Vendas")
-            for _, r in df_v.iterrows():
-                if pd.notna(r.get("Produto")):
-                    data_v = str(r.get("Data", ""))[:10]
-                    c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                              (r.get("Cliente", "Cliente Balcão"), r.get("Produto"), r.get("Quantidade"), r.get("Valor Venda"), data_v))
-            
-            # Importar Compras
-            df_c = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Compras")
-            for _, r in df_c.iterrows():
-                if pd.notna(r.get("Produto")):
-                    data_c = str(r.get("Data", ""))[:10]
-                    c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
-                              (r.get("Produto"), r.get("Quantidade Comprada (KG)"), r.get("Valor Total"), data_c))
+            if os.path.exists("KERO FISH_Financeira_Completa_Preenchida-4.xlsx"):
+                df_v = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Vendas")
+                for _, r in df_v.iterrows():
+                    if pd.notna(r.get("Produto")):
+                        data_v = str(r.get("Data", ""))[:10]
+                        c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
+                                  (r.get("Cliente", "Cliente Balcão"), r.get("Produto"), r.get("Quantidade"), r.get("Valor Venda"), data_v))
+                
+                # Importar Compras
+                df_c = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Compras")
+                for _, r in df_c.iterrows():
+                    if pd.notna(r.get("Produto")):
+                        data_c = str(r.get("Data", ""))[:10]
+                        c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
+                                  (r.get("Produto"), r.get("Quantidade Comprada (KG)"), r.get("Valor Total"), data_c))
 
-            conn.commit()
+                conn.commit()
+                st.success("Importação concluída com sucesso! Os dados foram integrados ao banco.")
+            else:
+                st.error("O arquivo Excel 'KERO FISH_Financeira_Completa_Preenchida-4.xlsx' não foi encontrado na raiz do projeto.")
+            
             conn.close()
-            st.success("Importação concluída com sucesso!")
         except Exception as e:
-            st.error(f"Erro: {e}")
+            st.error(f"Erro durante a importação: {e}")
