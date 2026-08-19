@@ -373,16 +373,18 @@ elif opcao == "Importar Planilha":
                                           (f"Compra: {prod_c}", "Saída", val_c, data_c))
                     except Exception as ex: st.warning(f"Compras: {ex}")
 
-                # 3. Estoque
+                # 3. Estoque (Ajustado para ler por posição da coluna: iloc)
                 aba_estoque = encontrar_aba("estoque")
                 if aba_estoque:
                     try:
                         df_e = pd.read_excel(xls, sheet_name=aba_estoque)
                         for _, r in df_e.iterrows():
-                            p_nome = r.get("Produto")
-                            p_qtd = float(r.get("Estoque Atual", 0.0) if pd.notna(r.get("Estoque Atual")) else r.get("Quantidade", 0.0))
-                            if pd.notna(p_nome):
-                                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (str(p_nome), "Geral", 0.0, p_qtd))
+                            p_nome = r.iloc[0] if pd.notna(r.iloc[0]) else None
+                            p_qtd = float(r.iloc[1]) if len(r) > 1 and pd.notna(r.iloc[1]) else 0.0
+                            
+                            if p_nome:
+                                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", 
+                                          (str(p_nome), "Geral", 0.0, p_qtd))
                     except Exception as ex: st.warning(f"Estoque: {ex}")
 
                 # 4. Despesas
@@ -413,7 +415,7 @@ elif opcao == "Importar Planilha":
                                           (str(forn), str(r.get("Contato", "")), str(r.get("Telefone", "")), str(r.get("ENDEREÇO", "") or r.get("Endereco", "")), str(r.get("Produto Fornecido", "")), str(r.get("Prazo Pagamento", "")), str(r.get("Observações", "") or r.get("Observacoes", ""))))
                     except Exception as ex: st.warning(f"Fornecedores: {ex}")
 
-                # 6. Contas a Pagar (Baseado na ordem exata da imagem: Vencimento, Fornecedor, Descrição, Valor, Status, Data Pagamento)
+                # 6. Contas a Pagar
                 aba_cp = encontrar_aba("pagar")
                 if aba_cp:
                     try:
@@ -430,7 +432,7 @@ elif opcao == "Importar Planilha":
                                           (str(forn_p or ""), str(desc_p or ""), val, venc, status, dt_pag))
                     except Exception as ex: st.warning(f"Contas_Pagar: {ex}")
 
-                # 7. Contas a Receber (Baseado na ordem exata da imagem: Cliente, Descrição, Valor, Vencimento, Status, Data Recebimento)
+                # 7. Contas a Receber
                 aba_cr = encontrar_aba("receber")
                 if aba_cr:
                     try:
