@@ -52,12 +52,40 @@ opcao = st.sidebar.radio(
     "Navegação", 
     [
         "Painel Geral", "Fornecedores", "Compras de produtos", "Estoque", 
-        "Clientes", "Vendas", "Financeiro", "Despesas Gerais", "Relatórios", "Normas"
+        "Clientes", "Vendas", "Financeiro", "Despesas Gerais", "Relatórios", "Normas","Importar Planilha"
     ]
 )
 
 # 1. DASHBOARD
 if opcao == "Painel Geral":
+    elif opçao == "Importar Planilha":
+    st.title("Importação de Dados")
+    if st.button("Confirmar Importação"):
+        try:
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            
+            # Importar Vendas
+            df_v = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Vendas")
+            for _, r in df_v.iterrows():
+                if pd.notna(r.get("Produto")):
+                    data_v = str(r.get("Data", ""))[:10]
+                    c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
+                              (r.get("Cliente", "Cliente Balcão"), r.get("Produto"), r.get("Quantidade"), r.get("Valor Venda"), data_v))
+            
+            # Importar Compras
+            df_c = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Compras")
+            for _, r in df_c.iterrows():
+                if pd.notna(r.get("Produto")):
+                    data_c = str(r.get("Data", ""))[:10]
+                    c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
+                              (r.get("Produto"), r.get("Quantidade Comprada (KG)"), r.get("Valor Total"), data_c))
+
+            conn.commit()
+            conn.close()
+            st.success("Importação concluída com sucesso!")
+        except Exception as e:
+            st.error(f"Erro: {e}")
     st.title("Painel Geral de Gestão")
     conn = sqlite3.connect(DB_FILE)
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
