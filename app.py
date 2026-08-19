@@ -129,6 +129,8 @@ elif opcao == "Estoque":
             conn.commit()
             conn.close()
             st.rerun()
+            
+    st.subheader("Produtos em Estoque (Incluindo Importados)")
     conn = sqlite3.connect(DB_FILE)
     df_full = pd.read_sql_query("SELECT * FROM produtos", conn)
     conn.close()
@@ -238,36 +240,82 @@ elif opcao == "Normas":
 
 # 11. IMPORTAR PLANILHA
 elif opcao == "Importar Planilha":
-    st.title("Importação de Dados da Planilha Antiga")
+    st.title("Importação Completa de Dados da Planilha Antiga")
     st.write("Certifique-se de que o arquivo `KERO FISH_Financeira_Completa_Preenchida-4.xlsx` está enviado na raiz do projeto no GitHub.")
     
-    if st.button("Confirmar Importação de Vendas e Compras"):
+    if st.button("Confirmar Importação Geral (Vendas, Compras, Estoque e Financeiro)"):
         try:
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            
-            # Importar Vendas
-            if os.path.exists("KERO FISH_Financeira_Completa_Preenchida-4.xlsx"):
-                df_v = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Vendas")
-                for _, r in df_v.iterrows():
-                    if pd.notna(r.get("Produto")):
-                        data_v = str(r.get("Data", ""))[:10]
-                        c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                                  (r.get("Cliente", "Cliente Balcão"), r.get("Produto"), r.get("Quantidade"), r.get("Valor Venda"), data_v))
+            if not os.path.exists("KERO FISH_Financeira_Completa_Preenchida-4.xlsx"):
+                st.error("O arquivo Excel 'KERO FISH_Financeira_Completa_Preenchida-4.xlsx' não foi encontrado na raiz do projeto.")
+            else:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
                 
-                # Importar Compras
-                df_c = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Compras")
-                for _, r in df_c.iterrows():
-                    if pd.notna(r.get("Produto")):
-                        data_c = str(r.get("Data", ""))[:10]
-                        c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
-                                  (r.get("Produto"), r.get("Quantidade Comprada (KG)"), r.get("Valor Total"), data_c))
+                # 1. Importar Vendas
+                try:
+                    df_v = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Vendas")
+                    for _, r in df_v.iterrows():
+                        if pd.notna(r.get("Produto")):
+                            data_v = str(r.get("Data", ""))[:10]
+                            c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
+                                      (r.get("Cliente", "Cliente Balcão"), r.get("Produto"), r.get("Quantidade"), r.get("Valor Venda"), data_v))
+                except Exception as ex_v:
+                    st.warning(f"Aviso na aba Vendas: {ex_v}")
+
+                # 2. Importar Compras
+                try:
+                    df_c = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Compras")
+                    for _, r in df_c.iterrows():
+                        if pd.notna(r.get("Produto")):
+                            data_c = str(r.get("Data", ""))[:10]
+                            c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
+                                      (r.get("Produto"), r.get("Quantidade Comprada (KG)"), r.get("Valor Total"), data_c))
+                except Exception as ex_c:
+                    st.warning(f"Aviso na aba Compras: {ex_c}")
+
+                # 3. Importar Estoque (Tentando ler aba 'Estoque' ou similar)
+                try:
+                    # Ajuste o nome da aba de estoque caso na sua planilha seja diferente (ex: "Produtos", "Estoque")
+                    for nome_aba_estq in ["Estoque", "Produtos", "ESTOQUE"]:
+                        try:
+                            df_e = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name=nome_aba_estq)
+                            for _, r in df_e.iterrows():
+                                p_nome = r.get("Produto") or r.get("Nome")
+                                if pd.notna(p_nome):
+                                    p_cat = r.get("Categoria", "Geral")
+                                    p_preco = r.get("Preço", 0.0) or r.get("Preço de Venda", 0.0)
+                                    p_qtd = r.get("Estoque", 0.0) or r.get("Quantidade", 0.0)
+                                    c.execute("SELECT id FROM produtos WHERE nome = ?", (p_nome,))
+                                    if c.fetchone():
+                                        c.execute("UPDATE produtos SET categoria = ?, preco_kg = ?, estoque_kg = ? WHERE nome = ?", (p_cat, p_preco, p_qtd, p_nome))
+                                    else:
+                                        c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (p_nome, p_cat, p_preco, p_qtd))
+                            break
+                        except:
+                            continue
+                except Exception as ex_e:
+                    st.warning(f"Aviso na aba Estoque: {ex_e}")
+
+                # 4. Importar Financeiro
+                try:
+                    for nome_aba_fin in ["Financeiro", "Caixa", "FINANCEIRO"]:
+                        try:
+                            df_f = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name=nome_aba_fin)
+                            for _, r in df_f.iterrows():
+                                desc = r.get("Descrição") or r.get("Historico") or r.get("Item")
+                                tipo = r.get("Tipo") or r.get("Entrada/Saída") or "Entrada"
+                                valor = r.get("Valor") or 0.0
+                                data_m = str(r.get("Data", ""))[:10]
+                                if pd.notna(desc) and pd.notna(valor):
+                                    c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (desc, tipo, valor, data_m))
+                            break
+                        except:
+                            continue
+                except Exception as ex_f:
+                    st.warning(f"Aviso na aba Financeiro: {ex_f}")
 
                 conn.commit()
-                st.success("Importação concluída com sucesso! Os dados foram integrados ao banco.")
-            else:
-                st.error("O arquivo Excel 'KERO FISH_Financeira_Completa_Preenchida-4.xlsx' não foi encontrado na raiz do projeto.")
-            
-            conn.close()
+                conn.close()
+                st.success("Importação geral concluída com sucesso! Verifique as abas de Estoque e Financeiro.")
         except Exception as e:
-            st.error(f"Erro durante a importação: {e}")
+            st.error(f"Erro geral durante a importação: {e}")
