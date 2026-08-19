@@ -306,27 +306,49 @@ elif opcao == "Importar Planilha":
                 st.error("O arquivo Excel 'KERO FISH_Financeira_Completa_Preenchida-4.xlsx' não foi encontrado na raiz do projeto.")
             else:
                 xls = pd.ExcelFile("KERO FISH_Financeira_Completa_Preenchida-4.xlsx")
-                abas_disponiveis = xls.sheet_names
+                nomes_abas = xls.sheet_names
                 
+                def encontrar_aba(termo):
+                    for a in nomes_abas:
+                        if termo.lower() in a.lower():
+                            return a
+                    return None
+
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 
-                # 1. Vendas & Extração de Clientes
-                if "Vendas" in abas_disponiveis:
+                # Limpar dados antigos para evitar duplicidade na reimportação
+                c.execute("DELETE FROM vendas")
+                c.execute("DELETE FROM compras")
+                c.execute("DELETE FROM produtos")
+                c.execute("DELETE FROM despesas")
+                c.execute("DELETE FROM fornecedores")
+                c.execute("DELETE FROM contas_pagar")
+                c.execute("DELETE FROM contas_receber")
+                c.execute("DELETE FROM entregas")
+                c.execute("DELETE FROM financeiro")
+                
+                # 1. Vendas & Clientes
+                aba_vendas = encontrar_aba("venda")
+                if aba_vendas:
                     try:
-                        df_v = pd.read_excel(xls, sheet_name="Vendas")
+                        df_v = pd.read_excel(xls, sheet_name=aba_vendas)
                         for _, r in df_v.iterrows():
                             prod = r.get("Produto")
                             if pd.notna(prod):
-                                data_v = str(r.get("Data", ""))[:10]
+                                data_v = str(r.get("Data", datetime.now().strftime("%Y-%m-%d")))[:10]
                                 cliente_nome = r.get("Cliente", "Cliente Balcão")
                                 if pd.isna(cliente_nome) or str(cliente_nome).strip() == "":
                                     cliente_nome = "Cliente Balcão"
-                                    
-                                c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                                          (str(cliente_nome), str(prod), r.get("Quantidade", 0.0), r.get("Valor Venda", 0.0), data_v))
                                 
-                                # Cadastrar cliente automaticamente se não existir
+                                val_venda = float(r.get("Valor Venda", 0.0) if pd.notna(r.get("Valor Venda")) else r.get("Valor", 0.0))
+                                qtd_venda = float(r.get("Quantidade", 1.0) if pd.notna(r.get("Quantidade")) else 1.0)
+                                
+                                c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
+                                          (str(cliente_nome), str(prod), qtd_venda, val_venda, data_v))
+                                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
+                                          (f"Venda: {prod} ({cliente_nome})", "Entrada", val_venda, data_v))
+                                
                                 c.execute("SELECT id FROM clientes WHERE nome = ?", (str(cliente_nome),))
                                 if not c.fetchone() and cliente_nome != "Cliente Balcão":
                                     c.execute("INSERT INTO clientes (nome, telefone, cidade, data_cad) VALUES (?, ?, ?, ?)",
@@ -334,92 +356,111 @@ elif opcao == "Importar Planilha":
                     except Exception as ex: st.warning(f"Vendas: {ex}")
 
                 # 2. Compras
-                if "Compras" in abas_disponiveis:
+                aba_compras = encontrar_aba("compra")
+                if aba_compras:
                     try:
-                        df_c = pd.read_excel(xls, sheet_name="Compras")
+                        df_c = pd.read_excel(xls, sheet_name=aba_compras)
                         for _, r in df_c.iterrows():
-                            if pd.notna(r.get("Produto")):
-                                data_c = str(r.get("Data", ""))[:10]
+                            prod_c = r.get("Produto")
+                            if pd.notna(prod_c):
+                                data_c = str(r.get("Data", datetime.now().strftime("%Y-%m-%d")))[:10]
+                                val_c = float(r.get("Valor Total", 0.0) if pd.notna(r.get("Valor Total")) else r.get("Valor", 0.0))
+                                qtd_c = float(r.get("Quantidade Comprada (KG)", 0.0) if pd.notna(r.get("Quantidade Comprada (KG)")) else r.get("Quantidade", 0.0))
+                                
                                 c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
-                                          (str(r.get("Produto")), r.get("Quantidade Comprada (KG)", 0.0), r.get("Valor Total", 0.0), data_c))
+                                          (str(prod_c), qtd_c, val_c, data_c))
+                                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)",
+                                          (f"Compra: {prod_c}", "Saída", val_c, data_c))
                     except Exception as ex: st.warning(f"Compras: {ex}")
 
                 # 3. Estoque
-                if "Estoque" in abas_disponiveis:
+                aba_estoque = encontrar_aba("estoque")
+                if aba_estoque:
                     try:
-                        df_e = pd.read_excel(xls, sheet_name="Estoque")
+                        df_e = pd.read_excel(xls, sheet_name=aba_estoque)
                         for _, r in df_e.iterrows():
                             p_nome = r.get("Produto")
-                            p_qtd = r.get("Estoque Atual", 0.0)
+                            p_qtd = float(r.get("Estoque Atual", 0.0) if pd.notna(r.get("Estoque Atual")) else r.get("Quantidade", 0.0))
                             if pd.notna(p_nome):
-                                c.execute("SELECT id FROM produtos WHERE nome = ?", (str(p_nome),))
-                                if c.fetchone():
-                                    c.execute("UPDATE produtos SET estoque_kg = ? WHERE nome = ?", (p_qtd, str(p_nome)))
-                                else:
-                                    c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (str(p_nome), "Geral", 0.0, p_qtd))
+                                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (str(p_nome), "Geral", 0.0, p_qtd))
                     except Exception as ex: st.warning(f"Estoque: {ex}")
 
                 # 4. Despesas
-                if "Despesas" in abas_disponiveis:
+                aba_despesas = encontrar_aba("despesa")
+                if aba_despesas:
                     try:
-                        df_d = pd.read_excel(xls, sheet_name="Despesas")
+                        df_d = pd.read_excel(xls, sheet_name=aba_despesas)
                         for _, r in df_d.iterrows():
-                            desc = r.get("Descrição")
+                            desc = r.get("Descrição") or r.get("Descricao")
                             valor = r.get("Valor")
                             if pd.notna(desc) and pd.notna(valor):
-                                data_d = str(r.get("Data", ""))[:10]
+                                data_d = str(r.get("Data", datetime.now().strftime("%Y-%m-%d")))[:10]
                                 cat = r.get("Categoria", "Geral")
                                 pag = r.get("Forma Pagamento", "Dinheiro")
-                                c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (data_d, str(cat), str(desc), valor, str(pag)))
-                                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc}", "Saída", valor, data_d))
+                                c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (data_d, str(cat), str(desc), float(valor), str(pag)))
+                                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc}", "Saída", float(valor), data_d))
                     except Exception as ex: st.warning(f"Despesas: {ex}")
 
                 # 5. Fornecedores
-                if "Fornecedores" in abas_disponiveis:
+                aba_forn = encontrar_aba("fornecedor")
+                if aba_forn:
                     try:
-                        df_f = pd.read_excel(xls, sheet_name="Fornecedores")
+                        df_f = pd.read_excel(xls, sheet_name=aba_forn)
                         for _, r in df_f.iterrows():
-                            forn = r.get("Fornecedor")
+                            forn = r.get("Fornecedor") or r.get("Fornecedores")
                             if pd.notna(forn):
                                 c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone, endereco, produto_fornecido, prazo_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                          (str(forn), str(r.get("Contato", "")), str(r.get("Telefone", "")), str(r.get("ENDEREÇO", "")), str(r.get("Produto Fornecido", "")), str(r.get("Prazo Pagamento", "")), str(r.get("Observações", ""))))
+                                          (str(forn), str(r.get("Contato", "")), str(r.get("Telefone", "")), str(r.get("ENDEREÇO", "") or r.get("Endereco", "")), str(r.get("Produto Fornecido", "")), str(r.get("Prazo Pagamento", "")), str(r.get("Observações", "") or r.get("Observacoes", ""))))
                     except Exception as ex: st.warning(f"Fornecedores: {ex}")
 
-                # 6. Contas_Pagar
-                if "Contas_Pagar" in abas_disponiveis:
+                # 6. Contas a Pagar (Baseado na ordem exata da imagem: Vencimento, Fornecedor, Descrição, Valor, Status, Data Pagamento)
+                aba_cp = encontrar_aba("pagar")
+                if aba_cp:
                     try:
-                        df_cp = pd.read_excel(xls, sheet_name="Contas_Pagar")
+                        df_cp = pd.read_excel(xls, sheet_name=aba_cp)
                         for _, r in df_cp.iterrows():
-                            forn_p = r.get("Fornecedor") or r.get("Fornecedores")
-                            if pd.notna(forn_p) or pd.notna(r.get("Descrição")):
+                            forn_p = r.get("Fornecedor")
+                            desc_p = r.get("Descrição") or r.get("Descricao")
+                            if pd.notna(forn_p) or pd.notna(desc_p):
+                                venc = str(r.get("Vencimento", ""))[:10]
+                                val = float(r.get("Valor", 0.0) if pd.notna(r.get("Valor")) else 0.0)
+                                status = str(r.get("Status", ""))
+                                dt_pag = str(r.get("Data Pagamento", ""))[:10]
                                 c.execute("INSERT INTO contas_pagar (fornecedor, descricao, valor, vencimento, status, data_pagamento) VALUES (?, ?, ?, ?, ?, ?)",
-                                          (str(forn_p), str(r.get("Descrição", "")), r.get("Valor", 0.0), str(r.get("Vencimento", ""))[:10], str(r.get("Status", "")), str(r.get("Data Pagamento", ""))[:10]))
+                                          (str(forn_p or ""), str(desc_p or ""), val, venc, status, dt_pag))
                     except Exception as ex: st.warning(f"Contas_Pagar: {ex}")
 
-                # 7. Contas_Receber
-                if "Contas_Receber" in abas_disponiveis:
+                # 7. Contas a Receber (Baseado na ordem exata da imagem: Cliente, Descrição, Valor, Vencimento, Status, Data Recebimento)
+                aba_cr = encontrar_aba("receber")
+                if aba_cr:
                     try:
-                        df_cr = pd.read_excel(xls, sheet_name="Contas_Receber")
+                        df_cr = pd.read_excel(xls, sheet_name=aba_cr)
                         for _, r in df_cr.iterrows():
                             cli_r = r.get("Cliente")
-                            if pd.notna(cli_r) or pd.notna(r.get("Descrição")):
+                            desc_r = r.get("Descrição") or r.get("Descricao")
+                            if pd.notna(cli_r) or pd.notna(desc_r):
+                                val = float(r.get("Valor", 0.0) if pd.notna(r.get("Valor")) else 0.0)
+                                venc = str(r.get("Vencimento", ""))[:10]
+                                status = str(r.get("Status", ""))
+                                dt_rec = str(r.get("Data Recebimento", ""))[:10]
                                 c.execute("INSERT INTO contas_receber (cliente, descricao, valor, vencimento, status, data_recebimento) VALUES (?, ?, ?, ?, ?, ?)",
-                                          (str(cli_r), str(r.get("Descrição", "")), r.get("Valor", 0.0), str(r.get("Vencimento", ""))[:10], str(r.get("Status", "")), str(r.get("Data Recebimento", ""))[:10]))
+                                          (str(cli_r or ""), str(desc_r or ""), val, venc, status, dt_rec))
                     except Exception as ex: st.warning(f"Contas_Receber: {ex}")
 
                 # 8. Entregas
-                if "Entregas" in abas_disponiveis:
+                aba_ent = encontrar_aba("entrega")
+                if aba_ent:
                     try:
-                        df_ent = pd.read_excel(xls, sheet_name="Entregas")
+                        df_ent = pd.read_excel(xls, sheet_name=aba_ent)
                         for _, r in df_ent.iterrows():
-                            data_ent = str(r.get("Data", ""))[:10]
+                            data_ent = str(r.get("Data", datetime.now().strftime("%Y-%m-%d")))[:10]
                             if pd.notna(r.get("Pedido")) or pd.notna(r.get("Bairro")):
                                 c.execute("INSERT INTO entregas (data_ent, pedido, bairro, entregador, taxa_entrega, custo_combustivel, lucro_entrega) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                                          (data_ent, str(r.get("Pedido", "")), str(r.get("Bairro", "")), str(r.get("Entregador", "")), r.get("Taxa Entrega", 0.0), r.get("Custo Combustivel", 0.0), r.get("Lucro Entrega", 0.0)))
+                                          (data_ent, str(r.get("Pedido", "")), str(r.get("Bairro", "")), str(r.get("Entregador", "")), float(r.get("Taxa Entrega", 0.0)), float(r.get("Custo Combustivel", 0.0)), float(r.get("Lucro Entrega", 0.0))))
                     except Exception as ex: st.warning(f"Entregas: {ex}")
 
                 conn.commit()
                 conn.close()
-                st.success("Importação completa e refinada realizada com sucesso!")
+                st.success("Importação completa e estruturada realizada com sucesso em todas as abas!")
         except Exception as e:
             st.error(f"Erro geral durante a importação: {e}")
