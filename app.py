@@ -52,20 +52,19 @@ opcao = st.sidebar.radio(
     "Navegação", 
     [
         "Painel Geral", "Fornecedores", "Compras de produtos", "Estoque", 
-        "Clientes", "Vendas", "Financeiro", "Despesas Gerais", "Relatórios", "Normas","Importar Planilha"
+        "Clientes", "Vendas", "Financeiro", "Despesas Gerais", "Relatórios", "Normas", "Importar Planilha"
     ]
 )
 
 # 1. DASHBOARD
 if opcao == "Painel Geral":
-       st.title("Painel Geral de Gestão")
+    st.title("Painel Geral de Gestão")
     
-        
-conn = sqlite3.connect(DB_FILE)
-        df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
-        df_clientes = pd.read_sql_query("SELECT * FROM clientes", conn)
-        df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
-        conn.close()
+    conn = sqlite3.connect(DB_FILE)
+    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
+    df_clientes = pd.read_sql_query("SELECT * FROM clientes", conn)
+    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn.close()
     
     total_faturado = df_vendas["valor_total"].sum() if not df_vendas.empty else 0.0
     entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum() if not df_fin.empty else 0.0
@@ -75,7 +74,7 @@ conn = sqlite3.connect(DB_FILE)
     col1.metric("Faturamento Vendas", f"R$ {total_faturado:,.2f}")
     col2.metric("Total Vendas", f"{len(df_vendas)}")
     col3.metric("Clientes", f"{len(df_clientes)}")
-    col4.metric("Saldo Caixa", f"R$ {entradas - saidas:,.2f}")
+    col4.metric("Saldo Caixa", f"R$ {entradas - saídas:,.2f}")
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
@@ -155,9 +154,8 @@ elif opcao == "Vendas":
                     st.success("Venda realizada com sucesso!")
                     st.rerun()
 
-# [O restante do seu código (Clientes, Financeiro, Despesas, Relatórios, Normas) permanece igual]
-# ... (mantenha os outros blocos elif da mesma forma que estavam no seu arquivo original)
-if opçao == "Importar Planilha":
+# IMPORTAR PLANILHA
+elif opcao == "Importar Planilha":
     st.title("Importação de Dados")
     if st.button("Confirmar Importação"):
         try:
