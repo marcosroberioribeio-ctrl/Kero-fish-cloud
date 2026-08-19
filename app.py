@@ -324,4 +324,19 @@ elif opcao == "Relatórios":
 elif opcao == "Normas":
     st.title("Normas e Procedimentos")
     st.markdown("---")
-    st.info("Espaço reservado para as diretrizes, normas sanitárias de manipulação de pescado e orientações internas do Kero Fish.")
+    
+    st.subheader("📋 Diretrizes de Manipulação de Pescado")
+    st.markdown("""
+    *   **Higiene Pessoal:** Lavagem rigorosa das mãos com sabonete antisséptico antes de manipular qualquer produto.
+    *   **Temperatura:** Manter sempre a cadeia de frio (gelo abundante) para garantir a integridade dos pescados e camarões.
+    *   **Utensílios:** Higienização de facas, tábuas e bandejas após cada uso.
+    *   **Organização:** Identificar os produtos por data de entrada para garantir o giro de estoque (o primeiro que entra é o primeiro que sai).
+    *   **Atendimento:** Manter a área de exposição limpa e o produto sempre bem apresentado ao cliente.
+    """)
+    
+    st.subheader("💡 Orientações Internas")
+    st.markdown("""
+    *   Sempre conferir o peso antes de finalizar a venda.
+    *   Em caso de dúvidas sobre a qualidade de algum lote, não expor para venda e reportar à gerência.
+    *   Manter o registro de entrada e saída atualizado no sistema Kero Fish ERP.
+    """)
