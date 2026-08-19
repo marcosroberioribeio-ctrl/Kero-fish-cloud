@@ -60,7 +60,8 @@ opcao = st.sidebar.radio(
 if opcao == "Painel Geral":
        st.title("Painel Geral de Gestão")
     
-        conn = sqlite3.connect(DB_FILE)
+        
+conn = sqlite3.connect(DB_FILE)
         df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
         df_clientes = pd.read_sql_query("SELECT * FROM clientes", conn)
         df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
