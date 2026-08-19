@@ -83,7 +83,7 @@ elif opcao == "Fornecedores":
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
-    st.title("Compras de Produtos")
+    st.title("Compras de Produtos e Histórico")
     with st.form("form_compra", clear_on_submit=True):
         prod = st.selectbox("Selecione o Produto", LISTA_PRODUTOS_MESTRA)
         qtd = st.number_input("Quantidade (KG/Unid)", min_value=0.1)
@@ -103,6 +103,12 @@ elif opcao == "Compras de produtos":
             conn.close()
             st.success("Compra registrada e estoque atualizado!")
             st.rerun()
+
+    st.subheader("Histórico de Compras (Incluindo Importadas)")
+    conn = sqlite3.connect(DB_FILE)
+    df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
+    conn.close()
+    st.dataframe(df_compras_db, use_container_width=True)
 
 # 4. ESTOQUE
 elif opcao == "Estoque":
@@ -153,20 +159,19 @@ elif opcao == "Clientes":
 
 # 6. VENDAS
 elif opcao == "Vendas":
-    st.title("Registrar Venda")
+    st.title("Registrar Venda e Histórico")
     conn = sqlite3.connect(DB_FILE)
     df_p = pd.read_sql_query("SELECT id, nome, preco_kg, estoque_kg FROM produtos", conn)
     conn.close()
     lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
-    if not lista_produtos:
-        st.warning("Cadastre produtos no Estoque primeiro.")
-    else:
-        with st.form("form_venda", clear_on_submit=True):
-            cliente_nome = st.text_input("Nome do Cliente (Opcional)")
-            produto_sel = st.selectbox("Produto", lista_produtos)
-            qtd_kg = st.number_input("Quantidade", min_value=0.1, format="%.2f")
-            prod_info = df_p[df_p["nome"] == produto_sel].iloc[0]
-            if st.form_submit_button("Finalizar Venda"):
+    
+    with st.form("form_venda", clear_on_submit=True):
+        cliente_nome = st.text_input("Nome do Cliente (Opcional)")
+        produto_sel = st.selectbox("Produto", lista_produtos if lista_produtos else ["Cadastre produtos no estoque"])
+        qtd_kg = st.number_input("Quantidade", min_value=0.1, format="%.2f")
+        if st.form_submit_button("Finalizar Venda"):
+            if lista_produtos:
+                prod_info = df_p[df_p["nome"] == produto_sel].iloc[0]
                 if qtd_kg > prod_info["estoque_kg"]:
                     st.error(f"Estoque insuficiente! Disponível: {prod_info['estoque_kg']}")
                 else:
@@ -181,6 +186,14 @@ elif opcao == "Vendas":
                     conn.close()
                     st.success("Venda realizada com sucesso!")
                     st.rerun()
+            else:
+                st.error("Cadastre produtos no estoque primeiro.")
+
+    st.subheader("Histórico de Vendas (Incluindo Importadas)")
+    conn = sqlite3.connect(DB_FILE)
+    df_vendas_db = pd.read_sql_query("SELECT * FROM vendas", conn)
+    conn.close()
+    st.dataframe(df_vendas_db, use_container_width=True)
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
