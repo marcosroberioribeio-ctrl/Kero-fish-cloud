@@ -29,7 +29,11 @@ def init_db():
     c.execute('CREATE TABLE IF NOT EXISTS vendas (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente TEXT, produto TEXT, qtd_kg REAL, valor_total REAL, data_venda TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS financeiro (id INTEGER PRIMARY KEY AUTOINCREMENT, descricao TEXT, tipo TEXT, valor REAL, data_mov TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS compras (id INTEGER PRIMARY KEY AUTOINCREMENT, produto TEXT, qtd REAL, valor_total REAL, data_compra TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS despesas (id INTEGER PRIMARY KEY AUTOINCREMENT, descricao TEXT, valor REAL, data_despesa TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS despesas (id INTEGER PRIMARY KEY AUTOINCREMENT, data_desp TEXT, categoria TEXT, descricao TEXT, valor REAL, pagamento TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS fornecedores (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor TEXT, contato TEXT, telefone TEXT, endereco TEXT, produto_fornecido TEXT, prazo_pagamento TEXT, observacoes TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS contas_pagar (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor TEXT, descricao TEXT, valor REAL, vencimento TEXT, status TEXT, data_pagamento TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS contas_receber (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente TEXT, descricao TEXT, valor REAL, vencimento TEXT, status TEXT, data_recebimento TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS entregas (id INTEGER PRIMARY KEY AUTOINCREMENT, data_ent TEXT, pedido TEXT, bairro TEXT, entregador TEXT, taxa_entrega REAL, custo_combustivel REAL, lucro_entrega REAL)')
     conn.commit()
     conn.close()
 
@@ -52,7 +56,8 @@ opcao = st.sidebar.radio(
     "Navegação", 
     [
         "Painel Geral", "Fornecedores", "Compras de produtos", "Estoque", 
-        "Clientes", "Vendas", "Financeiro", "Despesas Gerais", "Relatórios", "Normas", "Importar Planilha"
+        "Clientes", "Vendas", "Financeiro", "Despesas Gerais", 
+        "Contas a Pagar", "Contas a Receber", "Entregas", "Relatórios", "Normas", "Importar Planilha"
     ]
 )
 
@@ -79,7 +84,32 @@ if opcao == "Painel Geral":
 # 2. FORNECEDORES
 elif opcao == "Fornecedores":
     st.title("Gestão de Fornecedores")
-    st.info("Módulo de Fornecedores ativo.")
+    with st.form("form_fornecedor", clear_on_submit=True):
+        f_nome = st.text_input("Nome do Fornecedor")
+        f_contato = st.text_input("Contato / Responsável")
+        f_tel = st.text_input("Telefone")
+        f_end = st.text_input("Endereço")
+        f_prod = st.text_input("Produtos Fornecidos")
+        f_prazo = st.text_input("Prazo de Pagamento")
+        f_obs = st.text_input("Observações")
+        if st.form_submit_button("Cadastrar Fornecedor"):
+            if f_nome:
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone, endereco, produto_fornecido, prazo_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                          (f_nome, f_contato, f_tel, f_end, f_prod, f_prazo, f_obs))
+                conn.commit()
+                conn.close()
+                st.success("Fornecedor cadastrado com sucesso!")
+                st.rerun()
+            else:
+                st.error("O nome do fornecedor é obrigatório.")
+
+    st.subheader("Lista de Fornecedores")
+    conn = sqlite3.connect(DB_FILE)
+    df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
+    conn.close()
+    st.dataframe(df_forn, use_container_width=True)
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
@@ -104,7 +134,7 @@ elif opcao == "Compras de produtos":
             st.success("Compra registrada e estoque atualizado!")
             st.rerun()
 
-    st.subheader("Histórico de Compras (Incluindo Importadas)")
+    st.subheader("Histórico de Compras")
     conn = sqlite3.connect(DB_FILE)
     df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
     conn.close()
@@ -130,7 +160,7 @@ elif opcao == "Estoque":
             conn.close()
             st.rerun()
             
-    st.subheader("Produtos em Estoque (Incluindo Importados)")
+    st.subheader("Produtos em Estoque")
     conn = sqlite3.connect(DB_FILE)
     df_full = pd.read_sql_query("SELECT * FROM produtos", conn)
     conn.close()
@@ -191,7 +221,7 @@ elif opcao == "Vendas":
             else:
                 st.error("Cadastre produtos no estoque primeiro.")
 
-    st.subheader("Histórico de Vendas (Incluindo Importadas)")
+    st.subheader("Histórico de Vendas")
     conn = sqlite3.connect(DB_FILE)
     df_vendas_db = pd.read_sql_query("SELECT * FROM vendas", conn)
     conn.close()
@@ -216,34 +246,60 @@ elif opcao == "Despesas Gerais":
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 hoje = datetime.now().strftime("%Y-%m-%d")
-                c.execute("INSERT INTO despesas (descricao, valor, data_despesa) VALUES (?, ?, ?)", (desc_esp, val_esp, hoje))
+                c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (hoje, "Geral", desc_esp, val_esp, "Dinheiro"))
                 c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc_esp}", "Saída", val_esp, hoje))
                 conn.commit()
                 conn.close()
                 st.success("Despesa registrada com sucesso!")
             else:
                 st.error("Preencha a descrição e o valor corretamente.")
+    
+    st.subheader("Histórico de Despesas")
     conn = sqlite3.connect(DB_FILE)
     df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
     conn.close()
     st.dataframe(df_esp, use_container_width=True)
 
-# 9. RELATÓRIOS
+# 9. CONTAS A PAGAR
+elif opcao == "Contas a Pagar":
+    st.title("Contas a Pagar")
+    conn = sqlite3.connect(DB_FILE)
+    df_cp = pd.read_sql_query("SELECT * FROM contas_pagar", conn)
+    conn.close()
+    st.dataframe(df_cp, use_container_width=True)
+
+# 10. CONTAS A RECEBER
+elif opcao == "Contas a Receber":
+    st.title("Contas a Receber")
+    conn = sqlite3.connect(DB_FILE)
+    df_cr = pd.read_sql_query("SELECT * FROM contas_receber", conn)
+    conn.close()
+    st.dataframe(df_cr, use_container_width=True)
+
+# 11. ENTREGAS
+elif opcao == "Entregas":
+    st.title("Controle de Entregas")
+    conn = sqlite3.connect(DB_FILE)
+    df_ent = pd.read_sql_query("SELECT * FROM entregas", conn)
+    conn.close()
+    st.dataframe(df_ent, use_container_width=True)
+
+# 12. RELATÓRIOS
 elif opcao == "Relatórios":
     st.title("Relatórios do Sistema")
     st.info("Módulo de relatórios gerenciais.")
 
-# 10. NORMAS
+# 13. NORMAS
 elif opcao == "Normas":
     st.title("Normas e Procedimentos")
     st.info("Documentação interna e normas operacionais.")
 
-# 11. IMPORTAR PLANILHA
+# 14. IMPORTAR PLANILHA
 elif opcao == "Importar Planilha":
     st.title("Importação Completa de Dados da Planilha Antiga")
     st.write("Certifique-se de que o arquivo `KERO FISH_Financeira_Completa_Preenchida-4.xlsx` está enviado na raiz do projeto no GitHub.")
     
-    if st.button("Confirmar Importação Geral (Vendas, Compras, Estoque e Financeiro)"):
+    if st.button("Confirmar Importação de Todas as Abas"):
         try:
             if not os.path.exists("KERO FISH_Financeira_Completa_Preenchida-4.xlsx"):
                 st.error("O arquivo Excel 'KERO FISH_Financeira_Completa_Preenchida-4.xlsx' não foi encontrado na raiz do projeto.")
@@ -251,7 +307,7 @@ elif opcao == "Importar Planilha":
                 conn = sqlite3.connect(DB_FILE)
                 c = conn.cursor()
                 
-                # 1. Importar Vendas
+                # 1. Vendas
                 try:
                     df_v = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Vendas")
                     for _, r in df_v.iterrows():
@@ -259,10 +315,9 @@ elif opcao == "Importar Planilha":
                             data_v = str(r.get("Data", ""))[:10]
                             c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
                                       (r.get("Cliente", "Cliente Balcão"), r.get("Produto"), r.get("Quantidade"), r.get("Valor Venda"), data_v))
-                except Exception as ex_v:
-                    st.warning(f"Aviso na aba Vendas: {ex_v}")
+                except Exception as ex: st.warning(f"Vendas: {ex}")
 
-                # 2. Importar Compras
+                # 2. Compras
                 try:
                     df_c = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Compras")
                     for _, r in df_c.iterrows():
@@ -270,52 +325,78 @@ elif opcao == "Importar Planilha":
                             data_c = str(r.get("Data", ""))[:10]
                             c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)",
                                       (r.get("Produto"), r.get("Quantidade Comprada (KG)"), r.get("Valor Total"), data_c))
-                except Exception as ex_c:
-                    st.warning(f"Aviso na aba Compras: {ex_c}")
+                except Exception as ex: st.warning(f"Compras: {ex}")
 
-                # 3. Importar Estoque (Tentando ler aba 'Estoque' ou similar)
+                # 3. Estoque
                 try:
-                    # Ajuste o nome da aba de estoque caso na sua planilha seja diferente (ex: "Produtos", "Estoque")
-                    for nome_aba_estq in ["Estoque", "Produtos", "ESTOQUE"]:
-                        try:
-                            df_e = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name=nome_aba_estq)
-                            for _, r in df_e.iterrows():
-                                p_nome = r.get("Produto") or r.get("Nome")
-                                if pd.notna(p_nome):
-                                    p_cat = r.get("Categoria", "Geral")
-                                    p_preco = r.get("Preço", 0.0) or r.get("Preço de Venda", 0.0)
-                                    p_qtd = r.get("Estoque", 0.0) or r.get("Quantidade", 0.0)
-                                    c.execute("SELECT id FROM produtos WHERE nome = ?", (p_nome,))
-                                    if c.fetchone():
-                                        c.execute("UPDATE produtos SET categoria = ?, preco_kg = ?, estoque_kg = ? WHERE nome = ?", (p_cat, p_preco, p_qtd, p_nome))
-                                    else:
-                                        c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (p_nome, p_cat, p_preco, p_qtd))
-                            break
-                        except:
-                            continue
-                except Exception as ex_e:
-                    st.warning(f"Aviso na aba Estoque: {ex_e}")
+                    df_e = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Estoque")
+                    for _, r in df_e.iterrows():
+                        p_nome = r.get("Produto")
+                        p_qtd = r.get("Estoque Atual", 0.0)
+                        if pd.notna(p_nome):
+                            c.execute("SELECT id FROM produtos WHERE nome = ?", (p_nome,))
+                            if c.fetchone():
+                                c.execute("UPDATE produtos SET estoque_kg = ? WHERE nome = ?", (p_qtd, p_nome))
+                            else:
+                                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (p_nome, "Geral", 0.0, p_qtd))
+                except Exception as ex: st.warning(f"Estoque: {ex}")
 
-                # 4. Importar Financeiro
+                # 4. Despesas
                 try:
-                    for nome_aba_fin in ["Financeiro", "Caixa", "FINANCEIRO"]:
-                        try:
-                            df_f = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name=nome_aba_fin)
-                            for _, r in df_f.iterrows():
-                                desc = r.get("Descrição") or r.get("Historico") or r.get("Item")
-                                tipo = r.get("Tipo") or r.get("Entrada/Saída") or "Entrada"
-                                valor = r.get("Valor") or 0.0
-                                data_m = str(r.get("Data", ""))[:10]
-                                if pd.notna(desc) and pd.notna(valor):
-                                    c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (desc, tipo, valor, data_m))
-                            break
-                        except:
-                            continue
-                except Exception as ex_f:
-                    st.warning(f"Aviso na aba Financeiro: {ex_f}")
+                    df_d = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Despesas")
+                    for _, r in df_d.iterrows():
+                        desc = r.get("Descrição")
+                        valor = r.get("Valor")
+                        if pd.notna(desc) and pd.notna(valor):
+                            data_d = str(r.get("Data", ""))[:10]
+                            cat = r.get("Categoria", "Geral")
+                            pag = r.get("Forma Pagamento", "Dinheiro")
+                            c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (data_d, cat, desc, valor, pag))
+                            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc}", "Saída", valor, data_d))
+                except Exception as ex: st.warning(f"Despesas: {ex}")
+
+                # 5. Fornecedores
+                try:
+                    df_f = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Fornecedores")
+                    for _, r in df_f.iterrows():
+                        forn = r.get("Fornecedor")
+                        if pd.notna(forn):
+                            c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone, endereco, produto_fornecido, prazo_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                      (forn, str(r.get("Contato", "")), str(r.get("Telefone", "")), str(r.get("ENDEREÇO", "")), str(r.get("Produto Fornecido", "")), str(r.get("Prazo Pagamento", "")), str(r.get("Observações", ""))))
+                except Exception as ex: st.warning(f"Fornecedores: {ex}")
+
+                # 6. Contas_Pagar
+                try:
+                    df_cp = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Contas_Pagar")
+                    for _, r in df_cp.iterrows():
+                        forn_p = r.get("Fornecedor") or r.get("Fornecedores")
+                        if pd.notna(forn_p) or pd.notna(r.get("Descrição")):
+                            c.execute("INSERT INTO contas_pagar (fornecedor, descricao, valor, vencimento, status, data_pagamento) VALUES (?, ?, ?, ?, ?, ?)",
+                                      (str(forn_p), str(r.get("Descrição", "")), r.get("Valor", 0.0), str(r.get("Vencimento", ""))[:10], str(r.get("Status", "")), str(r.get("Data Pagamento", ""))[:10]))
+                except Exception as ex: st.warning(f"Contas_Pagar: {ex}")
+
+                # 7. Contas_Receber
+                try:
+                    df_cr = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Contas_Receber")
+                    for _, r in df_cr.iterrows():
+                        cli_r = r.get("Cliente")
+                        if pd.notna(cli_r) or pd.notna(r.get("Descrição")):
+                            c.execute("INSERT INTO contas_receber (cliente, descricao, valor, vencimento, status, data_recebimento) VALUES (?, ?, ?, ?, ?, ?)",
+                                      (str(cli_r), str(r.get("Descrição", "")), r.get("Valor", 0.0), str(r.get("Vencimento", ""))[:10], str(r.get("Status", "")), str(r.get("Data Recebimento", ""))[:10]))
+                except Exception as ex: st.warning(f"Contas_Receber: {ex}")
+
+                # 8. Entregas
+                try:
+                    df_ent = pd.read_excel("KERO FISH_Financeira_Completa_Preenchida-4.xlsx", sheet_name="Entregas")
+                    for _, r in df_ent.iterrows():
+                        data_ent = str(r.get("Data", ""))[:10]
+                        if pd.notna(r.get("Pedido")) or pd.notna(r.get("Bairro")):
+                            c.execute("INSERT INTO entregas (data_ent, pedido, bairro, entregador, taxa_entrega, custo_combustivel, lucro_entrega) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                      (data_ent, str(r.get("Pedido", "")), str(r.get("Bairro", "")), str(r.get("Entregador", "")), r.get("Taxa Entrega", 0.0), r.get("Custo Combustivel", 0.0), r.get("Lucro Entrega", 0.0)))
+                except Exception as ex: st.warning(f"Entregas: {ex}")
 
                 conn.commit()
                 conn.close()
-                st.success("Importação geral concluída com sucesso! Verifique as abas de Estoque e Financeiro.")
+                st.success("Importação de todas as abas realizada com sucesso!")
         except Exception as e:
             st.error(f"Erro geral durante a importação: {e}")
