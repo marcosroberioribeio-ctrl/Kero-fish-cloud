@@ -64,18 +64,31 @@ opcao = st.sidebar.radio(
     ]
 )
 
-# Função genérica para deletar registros com segurança
-def deletar_registro(tabela, id_registro):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    try:
-        c.execute(f"DELETE FROM {tabela} WHERE id = ?", (id_registro,))
-        conn.commit()
-        st.success(f"Registro ID {id_registro} da tabela '{tabela}' excluído com sucesso!")
-    except Exception as e:
-        st.error(f"Erro ao deletar: {e}")
-    finally:
-        conn.close()
+# Função genérica para deletar registros com segurança via selectbox
+def secao_exclusao(tabela, df, coluna_rotulo):
+    if df.empty:
+        return
+    st.markdown("---")
+    st.subheader("🗑️ Excluir Registro")
+    
+    # Criar um dicionário amigável ID -> Descrição/Nome para o selectbox
+    opcoes_delecao = {f"ID {row['id']} - {row[coluna_rotulo]}": row['id'] for _, row in df.iterrows()}
+    
+    selected_label = st.selectbox(f"Selecione o item para excluir ({tabela}):", list(opcoes_delecao.keys()), key=f"del_{tabela}")
+    
+    if st.button(f"Confirmar Exclusão ({tabela})", key=f"btn_del_{tabela}"):
+        id_para_deletar = opcoes_delecao[selected_label]
+        conn = sqlite3.connect(DB_FILE)
+        c = conn.cursor()
+        try:
+            c.execute(f"DELETE FROM {tabela} WHERE id = ?", (id_para_deletar,))
+            conn.commit()
+            st.success(f"Registro ID {id_para_deletar} excluído com sucesso!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao deletar: {e}")
+        finally:
+            conn.close()
 
 # 1. PAINEL GERAL
 if opcao == "Painel Geral":
@@ -129,13 +142,7 @@ elif opcao == "Fornecedores":
     df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
     conn.close()
     st.dataframe(df_forn, use_container_width=True)
-
-    if not df_forn.empty:
-        with st.form("del_forn"):
-            id_del = st.number_input("Digite o ID do Fornecedor para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Fornecedor"):
-                deletar_registro("fornecedores", id_del)
-                st.rerun()
+    secao_exclusao("fornecedores", df_forn, "fornecedor")
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
@@ -160,13 +167,7 @@ elif opcao == "Compras de produtos":
     df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
     conn.close()
     st.dataframe(df_compras_db, use_container_width=True)
-
-    if not df_compras_db.empty:
-        with st.form("del_compra"):
-            id_del = st.number_input("Digite o ID da Compra para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Compra"):
-                deletar_registro("compras", id_del)
-                st.rerun()
+    secao_exclusao("compras", df_compras_db, "produto")
 
 # 4. ESTOQUE
 elif opcao == "Estoque":
@@ -203,13 +204,7 @@ elif opcao == "Clientes":
     df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
     conn.close()
     st.dataframe(df_cli, use_container_width=True)
-
-    if not df_cli.empty:
-        with st.form("del_cli"):
-            id_del = st.number_input("Digite o ID do Cliente para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Cliente"):
-                deletar_registro("clientes", id_del)
-                st.rerun()
+    secao_exclusao("clientes", df_cli, "nome")
 
 # 6. VENDAS
 elif opcao == "Vendas":
@@ -236,13 +231,7 @@ elif opcao == "Vendas":
     df_vendas_db = pd.read_sql_query("SELECT * FROM vendas", conn)
     conn.close()
     st.dataframe(df_vendas_db, use_container_width=True)
-
-    if not df_vendas_db.empty:
-        with st.form("del_venda"):
-            id_del = st.number_input("Digite o ID da Venda para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Venda"):
-                deletar_registro("vendas", id_del)
-                st.rerun()
+    secao_exclusao("vendas", df_vendas_db, "produto")
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
@@ -264,12 +253,7 @@ elif opcao == "Financeiro":
         
         st.markdown("---")
         st.dataframe(df_fin, use_container_width=True)
-        
-        with st.form("del_fin"):
-            id_del = st.number_input("Digite o ID do lançamento financeiro para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Movimentação"):
-                deletar_registro("financeiro", id_del)
-                st.rerun()
+        secao_exclusao("financeiro", df_fin, "descricao")
     else:
         st.info("Nenhuma movimentação financeira registrada.")
 
@@ -294,13 +278,7 @@ elif opcao == "Despesas Gerais":
     df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
     conn.close()
     st.dataframe(df_esp, use_container_width=True)
-
-    if not df_esp.empty:
-        with st.form("del_desp"):
-            id_del = st.number_input("Digite o ID da Despesa para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Despesa"):
-                deletar_registro("despesas", id_del)
-                st.rerun()
+    secao_exclusao("despesas", df_esp, "descricao")
 
 # 9. CONTAS A PAGAR
 elif opcao == "Contas a Pagar":
@@ -323,13 +301,7 @@ elif opcao == "Contas a Pagar":
     df_cp = pd.read_sql_query("SELECT * FROM contas_pagar", conn)
     st.dataframe(df_cp, use_container_width=True)
     conn.close()
-
-    if not df_cp.empty:
-        with st.form("del_cp"):
-            id_del = st.number_input("Digite o ID da Conta a Pagar para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Conta a Pagar"):
-                deletar_registro("contas_pagar", id_del)
-                st.rerun()
+    secao_exclusao("contas_pagar", df_cp, "fornecedor")
 
 # 10. CONTAS A RECEBER
 elif opcao == "Contas a Receber":
@@ -352,13 +324,7 @@ elif opcao == "Contas a Receber":
     df_cr = pd.read_sql_query("SELECT * FROM contas_receber", conn)
     st.dataframe(df_cr, use_container_width=True)
     conn.close()
-
-    if not df_cr.empty:
-        with st.form("del_cr"):
-            id_del = st.number_input("Digite o ID da Conta a Receber para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Conta a Receber"):
-                deletar_registro("contas_receber", id_del)
-                st.rerun()
+    secao_exclusao("contas_receber", df_cr, "cliente")
 
 # 11. ENTREGAS
 elif opcao == "Entregas":
@@ -381,13 +347,7 @@ elif opcao == "Entregas":
     df_ent = pd.read_sql_query("SELECT * FROM entregas", conn)
     st.dataframe(df_ent, use_container_width=True)
     conn.close()
-
-    if not df_ent.empty:
-        with st.form("del_ent"):
-            id_del = st.number_input("Digite o ID da Entrega para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Entrega"):
-                deletar_registro("entregas", id_del)
-                st.rerun()
+    secao_exclusao("entregas", df_ent, "pedido")
 
 # 12. RELATÓRIOS
 elif opcao == "Relatórios":
@@ -490,5 +450,4 @@ elif opcao == "Importar Planilha":
                 st.error(f"Erro ao ler a planilha: {e}")
         else:
             st.error("Arquivo do Excel não foi encontrado na raiz do projeto.")
-      
       
