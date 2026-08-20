@@ -116,6 +116,17 @@ elif opcao == "Fornecedores":
     df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
     conn.close()
     st.dataframe(df_forn, use_container_width=True)
+    
+    if not df_forn.empty:
+        with st.form("del_forn"):
+            id_del = st.number_input("Digite o ID do Fornecedor para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Fornecedor"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM fornecedores WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Fornecedor ID {id_del} excluído!")
+                st.rerun()
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
@@ -129,7 +140,6 @@ elif opcao == "Compras de produtos":
             c = conn.cursor()
             hoje = datetime.now().strftime("%Y-%m-%d")
             c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)", (prod, qtd, val, hoje))
-            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Compra: {prod}", "Saída", val, hoje))
             conn.commit()
             conn.close()
             st.success("Compra registrada com sucesso!")
@@ -140,6 +150,17 @@ elif opcao == "Compras de produtos":
     df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
     conn.close()
     st.dataframe(df_compras_db, use_container_width=True)
+
+    if not df_compras_db.empty:
+        with st.form("del_compra"):
+            id_del = st.number_input("Digite o ID da Compra para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Compra"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM compras WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Compra ID {id_del} excluída!")
+                st.rerun()
 
 # 4. ESTOQUE
 elif opcao == "Estoque":
@@ -177,6 +198,17 @@ elif opcao == "Clientes":
     conn.close()
     st.dataframe(df_cli, use_container_width=True)
 
+    if not df_cli.empty:
+        with st.form("del_cli"):
+            id_del = st.number_input("Digite o ID do Cliente para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Cliente"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM clientes WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Cliente ID {id_del} excluído!")
+                st.rerun()
+
 # 6. VENDAS
 elif opcao == "Vendas":
     st.title("Registrar Venda e Histórico")
@@ -192,7 +224,6 @@ elif opcao == "Vendas":
             val_tot = qtd_kg * preco_unit
             c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
                       (cliente_nome if cliente_nome else "Balcão", produto_sel, qtd_kg, val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Venda: {produto_sel}", "Entrada", val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
             conn.commit()
             conn.close()
             st.success("Venda realizada!")
@@ -203,13 +234,28 @@ elif opcao == "Vendas":
     conn.close()
     st.dataframe(df_vendas_db, use_container_width=True)
 
+    if not df_vendas_db.empty:
+        with st.form("del_venda"):
+            id_del = st.number_input("Digite o ID da Venda para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Venda"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM vendas WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Venda ID {id_del} excluída!")
+                st.rerun()
+
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
-    st.title("Controle Financeiro")
+    st.title("Controle Financeiro (Consolidado)")
     
     conn = sqlite3.connect(DB_FILE)
-    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    df_vendas = pd.read_sql_query("SELECT id, data_venda as data, 'Venda: ' || produto as descricao, 'Entrada' as tipo, valor_total as valor FROM vendas", conn)
+    df_compras = pd.read_sql_query("SELECT id, data_compra as data, 'Compra: ' || produto as descricao, 'Saída' as tipo, valor_total as valor FROM compras", conn)
+    df_despesas = pd.read_sql_query("SELECT id, data_desp as data, 'Despesa: ' || descricao as descricao, 'Saída' as tipo, valor as valor FROM despesas", conn)
     conn.close()
+    
+    df_fin = pd.concat([df_vendas, df_compras, df_despesas], ignore_index=True)
     
     if not df_fin.empty:
         total_entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum()
@@ -217,9 +263,9 @@ elif opcao == "Financeiro":
         saldo_caixa = total_entradas - total_saidas
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Entradas", f"R$ {total_entradas:,.2f}")
-        col2.metric("Saídas", f"R$ {total_saidas:,.2f}")
-        col3.metric("Saldo Líquido", f"R$ {saldo_caixa:,.2f}")
+        col1.metric("Total Entradas", f"R$ {total_entradas:,.2f}")
+        col2.metric("Total Saídas", f"R$ {total_saidas:,.2f}")
+        col3.metric("Saldo em Caixa", f"R$ {saldo_caixa:,.2f}")
         
         st.markdown("---")
         st.dataframe(df_fin, use_container_width=True)
@@ -238,7 +284,6 @@ elif opcao == "Despesas Gerais":
                 c = conn.cursor()
                 hoje = datetime.now().strftime("%Y-%m-%d")
                 c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (hoje, "Geral", desc_esp, val_esp, "Dinheiro"))
-                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc_esp}", "Saída", val_esp, hoje))
                 conn.commit()
                 conn.close()
                 st.success("Despesa registrada!")
@@ -247,6 +292,17 @@ elif opcao == "Despesas Gerais":
     df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
     conn.close()
     st.dataframe(df_esp, use_container_width=True)
+
+    if not df_esp.empty:
+        with st.form("del_desp"):
+            id_del = st.number_input("Digite o ID da Despesa para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Despesa"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM despesas WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Despesa ID {id_del} excluída!")
+                st.rerun()
 
 # 9. CONTAS A PAGAR
 elif opcao == "Contas a Pagar":
@@ -266,8 +322,20 @@ elif opcao == "Contas a Pagar":
             st.success("Conta a pagar lançada com sucesso!")
             st.rerun()
     conn = sqlite3.connect(DB_FILE)
-    st.dataframe(pd.read_sql_query("SELECT * FROM contas_pagar", conn), use_container_width=True)
+    df_cp = pd.read_sql_query("SELECT * FROM contas_pagar", conn)
     conn.close()
+    st.dataframe(df_cp, use_container_width=True)
+
+    if not df_cp.empty:
+        with st.form("del_cp"):
+            id_del = st.number_input("Digite o ID para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Conta a Pagar"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM contas_pagar WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Conta ID {id_del} excluída!")
+                st.rerun()
 
 # 10. CONTAS A RECEBER
 elif opcao == "Contas a Receber":
@@ -287,8 +355,20 @@ elif opcao == "Contas a Receber":
             st.success("Conta a receber lançada com sucesso!")
             st.rerun()
     conn = sqlite3.connect(DB_FILE)
-    st.dataframe(pd.read_sql_query("SELECT * FROM contas_receber", conn), use_container_width=True)
+    df_cr = pd.read_sql_query("SELECT * FROM contas_receber", conn)
     conn.close()
+    st.dataframe(df_cr, use_container_width=True)
+
+    if not df_cr.empty:
+        with st.form("del_cr"):
+            id_del = st.number_input("Digite o ID para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Conta a Receber"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM contas_receber WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Conta ID {id_del} excluída!")
+                st.rerun()
 
 # 11. ENTREGAS
 elif opcao == "Entregas":
@@ -308,8 +388,20 @@ elif opcao == "Entregas":
             st.success("Entrega registrada com sucesso!")
             st.rerun()
     conn = sqlite3.connect(DB_FILE)
-    st.dataframe(pd.read_sql_query("SELECT * FROM entregas", conn), use_container_width=True)
+    df_ent = pd.read_sql_query("SELECT * FROM entregas", conn)
     conn.close()
+    st.dataframe(df_ent, use_container_width=True)
+
+    if not df_ent.empty:
+        with st.form("del_ent"):
+            id_del = st.number_input("Digite o ID para excluir", min_value=1, step=1)
+            if st.form_submit_button("Excluir Entrega"):
+                conn = sqlite3.connect(DB_FILE)
+                conn.execute("DELETE FROM entregas WHERE id = ?", (id_del,))
+                conn.commit()
+                conn.close()
+                st.success(f"Entrega ID {id_del} excluída!")
+                st.rerun()
 
 # 12. RELATÓRIOS
 elif opcao == "Relatórios":
@@ -319,7 +411,6 @@ elif opcao == "Relatórios":
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
     df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
     df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
-    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
     
     st.subheader("📊 Resumo Consolidado")
@@ -327,13 +418,6 @@ elif opcao == "Relatórios":
     c1.metric("Total de Vendas Registradas", len(df_vendas))
     c2.metric("Total de Despesas", f"R$ {df_despesas['valor'].sum() if not df_despesas.empty else 0.0:,.2f}")
     c3.metric("Total em Compras", f"R$ {df_compras['valor_total'].sum() if not df_compras.empty else 0.0:,.2f}")
-    
-    st.markdown("---")
-    st.subheader("📋 Extrato Financeiro Completo (Entradas e Saídas)")
-    if not df_fin.empty:
-        st.dataframe(df_fin, use_container_width=True)
-    else:
-        st.info("Nenhuma movimentação financeira registrada.")
         
     st.markdown("---")
     st.subheader("📦 Vendas por Produto")
