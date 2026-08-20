@@ -250,16 +250,27 @@ elif opcao == "Financeiro":
     st.title("Controle Financeiro (Consolidado)")
     
     conn = sqlite3.connect(DB_FILE)
-    df_vendas = pd.read_sql_query("SELECT id, data_venda as data, 'Venda: ' || produto as descricao, 'Entrada' as tipo, valor_total as valor FROM vendas", conn)
-    df_compras = pd.read_sql_query("SELECT id, data_compra as data, 'Compra: ' || produto as descricao, 'Saída' as tipo, valor_total as valor FROM compras", conn)
-    df_despesas = pd.read_sql_query("SELECT id, data_desp as data, 'Despesa: ' || descricao as descricao, 'Saída' as tipo, valor as valor FROM despesas", conn)
+    df_v = pd.read_sql_query("SELECT id, data_venda as data, produto, valor_total FROM vendas", conn)
+    df_c = pd.read_sql_query("SELECT id, data_compra as data, produto, valor_total FROM compras", conn)
+    df_d = pd.read_sql_query("SELECT id, data_desp as data, descricao, valor FROM despesas", conn)
     conn.close()
     
-    df_fin = pd.concat([df_vendas, df_compras, df_despesas], ignore_index=True)
+    lista_mov = []
+    if not df_v.empty:
+        for _, r in df_v.iterrows():
+            lista_mov.append({"ID Original": r["id"], "Origem": "Vendas", "Data": r["data"], "Descrição": f"Venda: {r['produto']}", "Tipo": "Entrada", "Valor": r["valor_total"]})
+    if not df_c.empty:
+        for _, r in df_c.iterrows():
+            lista_mov.append({"ID Original": r["id"], "Origem": "Compras", "Data": r["data"], "Descrição": f"Compra: {r['produto']}", "Tipo": "Saída", "Valor": r["valor_total"]})
+    if not df_d.empty:
+        for _, r in df_d.iterrows():
+            lista_mov.append({"ID Original": r["id"], "Origem": "Despesas", "Data": r["data"], "Descrição": f"Despesa: {r['descricao']}", "Tipo": "Saída", "Valor": r["valor"]})
+            
+    df_fin = pd.DataFrame(lista_mov)
     
     if not df_fin.empty:
-        total_entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum()
-        total_saidas = df_fin[df_fin["tipo"] == "Saída"]["valor"].sum()
+        total_entradas = df_fin[df_fin["Tipo"] == "Entrada"]["Valor"].sum()
+        total_saidas = df_fin[df_fin["Tipo"] == "Saída"]["Valor"].sum()
         saldo_caixa = total_entradas - total_saidas
         
         col1, col2, col3 = st.columns(3)
