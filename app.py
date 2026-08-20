@@ -261,10 +261,10 @@ elif opcao == "Normas":
     st.title("Normas e Procedimentos")
     st.info("Documentação interna.")
 
-# 14. IMPORTAR PLANILHA (AGORA COMPLETO)
+# 14. IMPORTAR PLANILHA (FORNECEDORES E CLIENTES)
 elif opcao == "Importar Planilha":
     st.title("Importação de Dados do Excel")
-    st.write("Clique no botão abaixo para ler o arquivo `KERO FISH_Financeira_Completa...` que está na raiz e importar todas as abas (fornecedores, compras, despesas, etc.) para o banco de dados.")
+    st.write("Clique no botão abaixo para ler o arquivo do Excel que está na raiz e importar Fornecedores e Clientes para o banco de dados.")
     
     if st.button("Confirmar Importação de Todas as Abas"):
         arquivo_excel = None
@@ -284,9 +284,9 @@ elif opcao == "Importar Planilha":
                     df = pd.read_excel(xls, sheet_name=sheet_name)
                     s_lower = sheet_name.lower()
                     
+                    # Importar Fornecedores
                     if "fornecedor" in s_lower:
                         for _, row in df.iterrows():
-                            # Tenta mapear colunas comuns de fornecedores dinamicamente
                             vals = [str(val) for val in row.values if pd.notna(val)]
                             if vals:
                                 nome_f = str(row.iloc[0]) if len(row) > 0 and pd.notna(row.iloc[0]) else "Desconhecido"
@@ -294,6 +294,18 @@ elif opcao == "Importar Planilha":
                                 tel_f = str(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else ""
                                 c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone) VALUES (?, ?, ?)", (nome_f, contato_f, tel_f))
                         importadas.append(f"Fornecedores ({sheet_name})")
+
+                    # Importar Clientes
+                    elif "cliente" in s_lower:
+                        for _, row in df.iterrows():
+                            vals = [str(val) for val in row.values if pd.notna(val)]
+                            if vals:
+                                nome_c = str(row.iloc[0]) if len(row) > 0 and pd.notna(row.iloc[0]) else "Desconhecido"
+                                tel_c = str(row.iloc[1]) if len(row) > 1 and pd.notna(row.iloc[1]) else ""
+                                cidade_c = str(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else ""
+                                c.execute("INSERT INTO clientes (nome, telefone, cidade, data_cad) VALUES (?, ?, ?, ?)", 
+                                          (nome_c, tel_c, cidade_c, datetime.now().strftime("%Y-%m-%d")))
+                        importadas.append(f"Clientes ({sheet_name})")
                         
                 conn.commit()
                 conn.close()
@@ -302,4 +314,4 @@ elif opcao == "Importar Planilha":
                 st.error(f"Erro ao ler a planilha: {e}")
         else:
             st.error("Arquivo do Excel não foi encontrado na raiz do projeto.")
-
+       
