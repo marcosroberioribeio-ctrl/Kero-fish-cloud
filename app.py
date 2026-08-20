@@ -47,7 +47,13 @@ for ext in ["png", "jpg", "jpeg", "PNG", "JPG"]:
 if logo_encontrada:
     st.sidebar.image(logo_encontrada, use_container_width=True)
 else:
-    st.sidebar.warning("Atenção: Envie o arquivo da logo para a raiz.")
+    st.sidebar.warning("Atenção: Envie o arquivo da logo para a raiz ou carregue abaixo.")
+    uploaded_logo = st.sidebar.file_uploader("Enviar arquivo da logo", type=["png", "jpg", "jpeg"])
+    if uploaded_logo is not None:
+        with open("logo.png", "wb") as f:
+            f.write(uploaded_logo.getbuffer())
+        st.success("Logo salva com sucesso! Atualizando...")
+        st.rerun()
 
 opcao = st.sidebar.radio(
     "Navegação", 
@@ -199,31 +205,26 @@ elif opcao == "Vendas":
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
-    st.title("Controle Financeiro (Extrato de Caixa)")
+    st.title("Controle Financeiro")
     
     conn = sqlite3.connect(DB_FILE)
     df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
     
     if not df_fin.empty:
-        # Filtros de Tipo de Movimentação
-        filtro_tipo = st.selectbox("Filtrar por Tipo", ["Todos", "Entrada", "Saída"])
-        df_filtrado = df_fin if filtro_tipo == "Todos" else df_fin[df_fin["tipo"] == filtro_tipo]
-        
-        # Métricas de Resumo
         total_entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum()
         total_saidas = df_fin[df_fin["tipo"] == "Saída"]["valor"].sum()
-        saldo_geral = total_entradas - total_saidas
+        saldo_caixa = total_entradas - total_saidas
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Total Entradas", f"R$ {total_entradas:,.2f}")
-        col2.metric("Total Saídas", f"R$ {total_saidas:,.2f}")
-        col3.metric("Saldo em Caixa", f"R$ {saldo_geral:,.2f}")
+        col1.metric("Entradas", f"R$ {total_entradas:,.2f}")
+        col2.metric("Saídas", f"R$ {total_saidas:,.2f}")
+        col3.metric("Saldo Líquido", f"R$ {saldo_caixa:,.2f}")
         
         st.markdown("---")
-        st.dataframe(df_filtrado, use_container_width=True)
+        st.dataframe(df_fin, use_container_width=True)
     else:
-        st.info("Nenhuma movimentação financeira registrada até o momento.")
+        st.info("Nenhuma movimentação financeira registrada.")
 
 # 8. DESPESAS GERAIS
 elif opcao == "Despesas Gerais":
@@ -345,24 +346,19 @@ elif opcao == "Relatórios":
 # 13. NORMAS
 elif opcao == "Normas":
     st.title("Normas e Procedimentos Operacionais - Kero Fish")
-    
     st.markdown("""
     ### 1. Higiene e Manipulação de Pescados
-    * **Uso de EPIs:** É obrigatório o uso de toucas, aventais impermeáveis, luvas adequadas e botas de borracha limpas durante o manuseio de peixes e frutos do mar.
-    * **Cadeia de Frio:** O pescado fresco deve permanecer sob refrigeração adequada ou em contato direto com gelo limpo em escamas. O tempo de exposição em temperatura ambiente deve ser o menor possível.
-    * **Limpeza e Sanitização:** As bancadas, facas, tábuas de corte e caixas térmicas devem ser rigorosamente higienizadas e sanitizadas antes e após o expediente ou na troca de turnos.
+    * **Uso de EPIs:** Obrigatório o uso de toucas, aventais impermeáveis, luvas adequadas e botas de borracha limpas durante o manuseio de peixes e frutos do mar.
+    * **Cadeia de Frio:** O pescado fresco deve permanecer sob refrigeração adequada ou em contato direto com gelo limpo em escamas.
+    * **Limpeza:** Bancadas, facas, tábuas de corte e caixas térmicas devem ser rigorosamente higienizadas antes e após o expediente.
 
     ### 2. Controle de Estoque e Validade
-    * **Método PEPS:** Utilize sempre o princípio **Primeiro a Entrar, Primeiro a Sair (PEPS)** para evitar perdas e garantir a rotação correta dos produtos armazenados.
-    * **Conferência de Carga:** Toda mercadoria recebida de fornecedores deve passar por dupla conferência de peso, temperatura e integridade visual antes de dar entrada no sistema.
+    * **Método PEPS:** Utilize sempre o princípio **Primeiro a Entrar, Primeiro a Sair (PEPS)** para correta rotação dos produtos.
+    * **Conferência:** Toda mercadoria recebida deve passar por dupla conferência de peso, temperatura e integridade antes do aceite.
 
-    ### 3. Atendimento ao Cliente e Vendas
-    * **Cordialidade:** O atendimento deve ser ágil, prestativo e focado na excelência, tirando dúvidas sobre cortes, conservação e peso.
-    * **Registro Rigoroso:** Nenhuma saída de mercadoria (venda, cortesia ou consumo interno) pode ser feita sem o devido lançamento imediato no sistema ERP para manter o estoque e o financeiro sincronizados.
-
-    ### 4. Segurança Financeira e Caixa
-    * **Fechamento Diário:** O caixa físico deve ser conferido diariamente e batido com os registros de entradas do sistema.
-    * **Comprovantes:** Despesas pagas ou contas liquidadas exigem sempre o registro fotográfico ou o armazenamento do comprovante físico para fins de auditoria interna.
+    ### 3. Atendimento e Vendas
+    * **Cordialidade:** Atendimento ágil e prestativo, auxiliando o cliente com informações sobre cortes e conservação.
+    * **Registro Rigoroso:** Nenhuma saída de mercadoria pode ser feita sem o devido lançamento imediato no ERP.
     """)
 
 # 14. IMPORTAR PLANILHA
@@ -416,4 +412,4 @@ elif opcao == "Importar Planilha":
                 st.error(f"Erro ao ler a planilha: {e}")
         else:
             st.error("Arquivo do Excel não foi encontrado na raiz do projeto.")
-       
+      
