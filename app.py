@@ -64,16 +64,52 @@ opcao = st.sidebar.radio(
     ]
 )
 
-# Função genérica para deletar registros com segurança via selectbox
+# --- Funções auxiliares de Edição e Exclusão ---
+
+def secao_edicao(tabela, df, colunas_editaveis, coluna_rotulo):
+    if df.empty:
+        return
+    st.markdown("---")
+    st.subheader(f"✏️ Editar Registro ({tabela})")
+    
+    opcoes = {f"ID {row['id']} - {row[coluna_rotulo]}": row['id'] for _, row in df.iterrows()}
+    selected_label = st.selectbox(f"Selecione o item para editar ({tabela}):", list(opcoes.keys()), key=f"edit_sel_{tabela}")
+    id_selecionado = opcoes[selected_label]
+    
+    conn = sqlite3.connect(DB_FILE)
+    registro = pd.read_sql_query(f"SELECT * FROM {tabela} WHERE id = ?", conn, params=(id_selecionado,))
+    conn.close()
+    
+    if not registro.empty:
+        row = registro.iloc[0]
+        with st.form(f"form_edit_{tabela}"):
+            novos_dados = {}
+            for col in colunas_editaveis:
+                val_atual = row[col] if pd.notna(row[col]) else ""
+                novos_dados[col] = st.text_input(f"Editar {col}", value=str(val_atual))
+            
+            if st.form_submit_button(f"Salvar Alterações ({tabela})"):
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                try:
+                    set_clause = ", ".join([f"{col} = ?" for col in colunas_editaveis])
+                    params = [novos_dados[col] for col in colunas_editaveis] + [id_selecionado]
+                    c.execute(f"UPDATE {tabela} SET {set_clause} WHERE id = ?", params)
+                    conn.commit()
+                    st.success("Registro atualizado com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao atualizar: {e}")
+                finally:
+                    conn.close()
+
 def secao_exclusao(tabela, df, coluna_rotulo):
     if df.empty:
         return
     st.markdown("---")
-    st.subheader("🗑️ Excluir Registro")
+    st.subheader(f"🗑️ Excluir Registro ({tabela})")
     
-    # Criar um dicionário amigável ID -> Descrição/Nome para o selectbox
     opcoes_delecao = {f"ID {row['id']} - {row[coluna_rotulo]}": row['id'] for _, row in df.iterrows()}
-    
     selected_label = st.selectbox(f"Selecione o item para excluir ({tabela}):", list(opcoes_delecao.keys()), key=f"del_{tabela}")
     
     if st.button(f"Confirmar Exclusão ({tabela})", key=f"btn_del_{tabela}"):
@@ -142,6 +178,7 @@ elif opcao == "Fornecedores":
     df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
     conn.close()
     st.dataframe(df_forn, use_container_width=True)
+    secao_edicao("fornecedores", df_forn, ["fornecedor", "contato", "telefone", "endereco", "produto_fornecido", "prazo_pagamento", "observacoes"], "fornecedor")
     secao_exclusao("fornecedores", df_forn, "fornecedor")
 
 # 3. COMPRAS DE PRODUTOS
@@ -167,6 +204,7 @@ elif opcao == "Compras de produtos":
     df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
     conn.close()
     st.dataframe(df_compras_db, use_container_width=True)
+    secao_edicao("compras", df_compras_db, ["produto", "qtd", "valor_total"], "produto")
     secao_exclusao("compras", df_compras_db, "produto")
 
 # 4. ESTOQUE
@@ -204,6 +242,7 @@ elif opcao == "Clientes":
     df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
     conn.close()
     st.dataframe(df_cli, use_container_width=True)
+    secao_edicao("clientes", df_cli, ["nome", "telefone", "cidade"], "nome")
     secao_exclusao("clientes", df_cli, "nome")
 
 # 6. VENDAS
@@ -231,6 +270,7 @@ elif opcao == "Vendas":
     df_vendas_db = pd.read_sql_query("SELECT * FROM vendas", conn)
     conn.close()
     st.dataframe(df_vendas_db, use_container_width=True)
+    secao_edicao("vendas", df_vendas_db, ["cliente", "produto", "qtd_kg", "valor_total"], "produto")
     secao_exclusao("vendas", df_vendas_db, "produto")
 
 # 7. FINANCEIRO
@@ -253,6 +293,7 @@ elif opcao == "Financeiro":
         
         st.markdown("---")
         st.dataframe(df_fin, use_container_width=True)
+        secao_edicao("financeiro", df_fin, ["descricao", "tipo", "valor"], "descricao")
         secao_exclusao("financeiro", df_fin, "descricao")
     else:
         st.info("Nenhuma movimentação financeira registrada.")
@@ -278,6 +319,7 @@ elif opcao == "Despesas Gerais":
     df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
     conn.close()
     st.dataframe(df_esp, use_container_width=True)
+    secao_edicao("despesas", df_esp, ["categoria", "descricao", "valor", "pagamento"], "descricao")
     secao_exclusao("despesas", df_esp, "descricao")
 
 # 9. CONTAS A PAGAR
@@ -299,8 +341,9 @@ elif opcao == "Contas a Pagar":
             st.rerun()
     conn = sqlite3.connect(DB_FILE)
     df_cp = pd.read_sql_query("SELECT * FROM contas_pagar", conn)
-    st.dataframe(df_cp, use_container_width=True)
     conn.close()
+    st.dataframe(df_cp, use_container_width=True)
+    secao_edicao("contas_pagar", df_cp, ["fornecedor", "descricao", "valor", "status"], "fornecedor")
     secao_exclusao("contas_pagar", df_cp, "fornecedor")
 
 # 10. CONTAS A RECEBER
@@ -322,8 +365,9 @@ elif opcao == "Contas a Receber":
             st.rerun()
     conn = sqlite3.connect(DB_FILE)
     df_cr = pd.read_sql_query("SELECT * FROM contas_receber", conn)
-    st.dataframe(df_cr, use_container_width=True)
     conn.close()
+    st.dataframe(df_cr, use_container_width=True)
+    secao_edicao("contas_receber", df_cr, ["cliente", "descricao", "valor", "status"], "cliente")
     secao_exclusao("contas_receber", df_cr, "cliente")
 
 # 11. ENTREGAS
@@ -345,8 +389,9 @@ elif opcao == "Entregas":
             st.rerun()
     conn = sqlite3.connect(DB_FILE)
     df_ent = pd.read_sql_query("SELECT * FROM entregas", conn)
-    st.dataframe(df_ent, use_container_width=True)
     conn.close()
+    st.dataframe(df_ent, use_container_width=True)
+    secao_edicao("entregas", df_ent, ["pedido", "bairro", "entregador", "taxa_entrega"], "pedido")
     secao_exclusao("entregas", df_ent, "pedido")
 
 # 12. RELATÓRIOS
