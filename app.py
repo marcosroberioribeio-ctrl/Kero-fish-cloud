@@ -292,8 +292,35 @@ elif opcao == "Entregas":
 
 # 12. RELATÓRIOS
 elif opcao == "Relatórios":
-    st.title("Relatórios do Sistema")
-    st.info("Módulo de relatórios gerenciais.")
+    st.title("Relatórios e Indicadores Gerenciais")
+    
+    conn = sqlite3.connect(DB_FILE)
+    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
+    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
+    df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
+    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn.close()
+    
+    st.subheader("📊 Resumo Consolidado")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total de Vendas Registradas", len(df_vendas))
+    c2.metric("Total de Despesas", f"R$ {df_despesas['valor'].sum() if not df_despesas.empty else 0.0:,.2f}")
+    c3.metric("Total em Compras", f"R$ {df_compras['valor_total'].sum() if not df_compras.empty else 0.0:,.2f}")
+    
+    st.markdown("---")
+    st.subheader("📋 Extrato Financeiro Completo (Entradas e Saídas)")
+    if not df_fin.empty:
+        st.dataframe(df_fin, use_container_width=True)
+    else:
+        st.info("Nenhuma movimentação financeira registrada.")
+        
+    st.markdown("---")
+    st.subheader("📦 Vendas por Produto")
+    if not df_vendas.empty:
+        df_vendas_resumo = df_vendas.groupby("produto")[["qtd_kg", "valor_total"]].sum().reset_index()
+        st.dataframe(df_vendas_resumo, use_container_width=True)
+    else:
+        st.info("Nenhuma venda realizada para gerar o relatório de produtos.")
 
 # 13. NORMAS
 elif opcao == "Normas":
