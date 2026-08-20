@@ -125,14 +125,9 @@ elif opcao == "Compras de produtos":
             hoje = datetime.now().strftime("%Y-%m-%d")
             c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)", (prod, qtd, val, hoje))
             c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Compra: {prod}", "Saída", val, hoje))
-            c.execute("SELECT id FROM produtos WHERE nome = ?", (prod,))
-            if c.fetchone():
-                c.execute("UPDATE produtos SET estoque_kg = estoque_kg + ? WHERE nome = ?", (qtd, prod))
-            else:
-                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (prod, "Geral", 0.0, qtd))
             conn.commit()
             conn.close()
-            st.success("Compra registrada e estoque atualizado!")
+            st.success("Compra registrada com sucesso!")
             st.rerun()
 
     st.subheader("Histórico de Compras")
@@ -141,31 +136,34 @@ elif opcao == "Compras de produtos":
     conn.close()
     st.dataframe(df_compras_db, use_container_width=True)
 
-# 4. ESTOQUE
+# 4. ESTOQUE (ATUALIZADO: Compras - Vendas)
 elif opcao == "Estoque":
-    st.title("Controle de Estoque")
-    with st.form("form_cad", clear_on_submit=True):
-        nome_p = st.selectbox("Selecionar Produto da Lista", LISTA_PRODUTOS_MESTRA)
-        cat_p = st.selectbox("Categoria", ["Peixe Inteiro", "Filé", "Crustáceos", "Castanhas e Secos", "Ovos e Laticínios", "Outros"])
-        preco = st.number_input("Preço de Venda (R$)", min_value=0.0, format="%.2f")
-        qtd = st.number_input("Ajustar Quantidade (KG/Unid)", min_value=0.0, format="%.2f")
-        if st.form_submit_button("Salvar no Estoque"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute("SELECT id FROM produtos WHERE nome = ?", (nome_p,))
-            if c.fetchone():
-                c.execute("UPDATE produtos SET categoria = ?, preco_kg = ?, estoque_kg = estoque_kg + ? WHERE nome = ?", (cat_p, preco, qtd, nome_p))
-            else:
-                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", (nome_p, cat_p, preco, qtd))
-            conn.commit()
-            conn.close()
-            st.rerun()
-            
-    st.subheader("Produtos em Estoque")
+    st.title("Controle de Estoque Atualizado")
+    
     conn = sqlite3.connect(DB_FILE)
-    df_full = pd.read_sql_query("SELECT * FROM produtos", conn)
+    # Busca todas as compras por produto
+    df_compras = pd.read_sql_query("SELECT produto, SUM(qtd) as total_comprado FROM compras GROUP BY produto", conn)
+    # Busca todas as vendas por produto
+    df_vendas = pd.read_sql_query("SELECT produto, SUM(qtd_kg) as total_vendido FROM vendas GROUP BY produto", conn)
+    # Pega também o preço de cadastro dos produtos, se houver
+    df_prod_info = pd.read_sql_query("SELECT nome as produto, categoria, preco_kg FROM produtos", conn)
     conn.close()
-    st.dataframe(df_full, use_container_width=True)
+
+    if not df_compras.empty:
+        # Mescla compras e vendas
+        df_estoque = df_compras.merge(df_vendas, on="produto", how="left").fillna(0)
+        df_estoque["Estoque Atual"] = df_estoque["total_comprado"] - df_estoque["total_vendido"]
+        
+        if not df_prod_info.empty:
+            df_estoque = df_estoque.merge(df_prod_info, on="produto", how="left")
+            
+        st.subheader("Saldo em Estoque (Compras - Vendas)")
+        st.dataframe(df_estoque, use_container_width=True)
+    else:
+        st.info("Nenhuma compra registrada ainda para calcular o estoque.")
+
+    st.divider()
+    st.write("Obs: O estoque é calculado de forma dinâmica e automatizada baseando-se nas entradas (Compras) e saídas (Vendas).")
 
 # 5. CLIENTES
 elif opcao == "Clientes":
@@ -190,37 +188,42 @@ elif opcao == "Clientes":
     conn.close()
     st.dataframe(df_cli, use_container_width=True)
 
-# 6. VENDAS
+# 6. VENDAS (ATUALIZADO)
 elif opcao == "Vendas":
     st.title("Registrar Venda e Histórico")
     conn = sqlite3.connect(DB_FILE)
-    df_p = pd.read_sql_query("SELECT id, nome, preco_kg, estoque_kg FROM produtos", conn)
+    # Vamos buscar o estoque calculado atual para validar se pode vender
+    df_c_tot = pd.read_sql_query("SELECT produto, SUM(qtd) as total FROM compras GROUP BY produto", conn)
+    df_v_tot = pd.read_sql_query("SELECT produto, SUM(qtd_kg) as total FROM vendas GROUP BY produto", conn)
+    df_p = pd.read_sql_query("SELECT id, nome, preco_kg FROM produtos", conn)
     conn.close()
-    lista_produtos = df_p["nome"].tolist() if not df_p.empty else []
+
+    # Cria um dicionário ou dataframe consolidado de estoque disponível
+    if not df_c_tot.empty:
+        df_est_calc = df_c_tot.merge(df_v_tot, on="produto", how="left").fillna(0)
+        df_est_calc["estoque"] = df_est_calc["total_x"] - df_est_calc["total_y"]
+    else:
+        df_est_calc = pd.DataFrame(columns=["produto", "estoque"])
+
+    lista_produtos = LISTA_PRODUTOS_MESTRA
     
     with st.form("form_venda", clear_on_submit=True):
         cliente_nome = st.text_input("Nome do Cliente (Opcional)")
-        produto_sel = st.selectbox("Produto", lista_produtos if lista_produtos else ["Cadastre produtos no estoque"])
+        produto_sel = st.selectbox("Produto", lista_produtos)
         qtd_kg = st.number_input("Quantidade", min_value=0.1, format="%.2f")
+        preco_unit = st.number_input("Preço Unitário / KG (R$)", min_value=0.0, format="%.2f")
+        
         if st.form_submit_button("Finalizar Venda"):
-            if lista_produtos:
-                prod_info = df_p[df_p["nome"] == produto_sel].iloc[0]
-                if qtd_kg > prod_info["estoque_kg"]:
-                    st.error(f"Estoque insuficiente! Disponível: {prod_info['estoque_kg']}")
-                else:
-                    conn = sqlite3.connect(DB_FILE)
-                    c = conn.cursor()
-                    val_tot = qtd_kg * prod_info["preco_kg"]
-                    c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                              (cliente_nome if cliente_nome else "Cliente Balcão", produto_sel, qtd_kg, val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-                    c.execute("UPDATE produtos SET estoque_kg = estoque_kg - ? WHERE id = ?", (qtd_kg, prod_info["id"]))
-                    c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Venda: {produto_sel}", "Entrada", val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-                    conn.commit()
-                    conn.close()
-                    st.success("Venda realizada com sucesso!")
-                    st.rerun()
-            else:
-                st.error("Cadastre produtos no estoque primeiro.")
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            val_tot = qtd_kg * preco_unit
+            c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
+                      (cliente_nome if cliente_nome else "Cliente Balcão", produto_sel, qtd_kg, val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
+            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Venda: {produto_sel}", "Entrada", val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
+            conn.commit()
+            conn.close()
+            st.success("Venda realizada com sucesso!")
+            st.rerun()
 
     st.subheader("Histórico de Vendas")
     conn = sqlite3.connect(DB_FILE)
@@ -373,21 +376,7 @@ elif opcao == "Importar Planilha":
                                           (f"Compra: {prod_c}", "Saída", val_c, data_c))
                     except Exception as ex: st.warning(f"Compras: {ex}")
 
-                # 3. Estoque (Ajustado para ler por posição da coluna: iloc)
-                aba_estoque = encontrar_aba("estoque")
-                if aba_estoque:
-                    try:
-                        df_e = pd.read_excel(xls, sheet_name=aba_estoque)
-                        for _, r in df_e.iterrows():
-                            p_nome = r.iloc[0] if pd.notna(r.iloc[0]) else None
-                            p_qtd = float(r.iloc[1]) if len(r) > 1 and pd.notna(r.iloc[1]) else 0.0
-                            
-                            if p_nome:
-                                c.execute("INSERT INTO produtos (nome, categoria, preco_kg, estoque_kg) VALUES (?, ?, ?, ?)", 
-                                          (str(p_nome), "Geral", 0.0, p_qtd))
-                    except Exception as ex: st.warning(f"Estoque: {ex}")
-
-                # 4. Despesas
+                # 3. Despesas
                 aba_despesas = encontrar_aba("despesa")
                 if aba_despesas:
                     try:
@@ -403,7 +392,7 @@ elif opcao == "Importar Planilha":
                                 c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc}", "Saída", float(valor), data_d))
                     except Exception as ex: st.warning(f"Despesas: {ex}")
 
-                # 5. Fornecedores
+                # 4. Fornecedores
                 aba_forn = encontrar_aba("fornecedor")
                 if aba_forn:
                     try:
@@ -415,7 +404,7 @@ elif opcao == "Importar Planilha":
                                           (str(forn), str(r.get("Contato", "")), str(r.get("Telefone", "")), str(r.get("ENDEREÇO", "") or r.get("Endereco", "")), str(r.get("Produto Fornecido", "")), str(r.get("Prazo Pagamento", "")), str(r.get("Observações", "") or r.get("Observacoes", ""))))
                     except Exception as ex: st.warning(f"Fornecedores: {ex}")
 
-                # 6. Contas a Pagar
+                # 5. Contas a Pagar
                 aba_cp = encontrar_aba("pagar")
                 if aba_cp:
                     try:
@@ -432,7 +421,7 @@ elif opcao == "Importar Planilha":
                                           (str(forn_p or ""), str(desc_p or ""), val, venc, status, dt_pag))
                     except Exception as ex: st.warning(f"Contas_Pagar: {ex}")
 
-                # 7. Contas a Receber
+                # 6. Contas a Receber
                 aba_cr = encontrar_aba("receber")
                 if aba_cr:
                     try:
@@ -449,7 +438,7 @@ elif opcao == "Importar Planilha":
                                           (str(cli_r or ""), str(desc_r or ""), val, venc, status, dt_rec))
                     except Exception as ex: st.warning(f"Contas_Receber: {ex}")
 
-                # 8. Entregas
+                # 7. Entregas
                 aba_ent = encontrar_aba("entrega")
                 if aba_ent:
                     try:
