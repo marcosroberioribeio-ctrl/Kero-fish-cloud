@@ -47,7 +47,7 @@ for ext in ["png", "jpg", "jpeg", "PNG", "JPG"]:
 if logo_encontrada:
     st.sidebar.image(logo_encontrada, use_container_width=True)
 else:
-    st.sidebar.warning("Atenção: Envie o arquivo da logo para a raiz ou carregue abaixo.")
+    st.sidebar.warning("Atenção: Envie o arquivo da logo para a raiz.")
     uploaded_logo = st.sidebar.file_uploader("Enviar arquivo da logo", type=["png", "jpg", "jpeg"])
     if uploaded_logo is not None:
         with open("logo.png", "wb") as f:
@@ -69,14 +69,14 @@ if opcao == "Painel Geral":
     st.title("Painel Geral de Gestão")
     
     conn = sqlite3.connect(DB_FILE)
-    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
-    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
-    df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
+    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn) if "vendas" in [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()] else pd.DataFrame()
+    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn) if "despesas" in [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()] else pd.DataFrame()
+    df_compras = pd.read_sql_query("SELECT * FROM compras", conn) if "compras" in [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()] else pd.DataFrame()
     conn.close()
     
-    total_faturado = df_vendas["valor_total"].sum() if not df_vendas.empty else 0.0
-    total_despesas = df_despesas["valor"].sum() if not df_despesas.empty else 0.0
-    total_compras = df_compras["valor_total"].sum() if not df_compras.empty else 0.0
+    total_faturado = df_vendas["valor_total"].sum() if not df_vendas.empty and "valor_total" in df_vendas.columns else 0.0
+    total_despesas = df_despesas["valor"].sum() if not df_despesas.empty and "valor" in df_despesas.columns else 0.0
+    total_compras = df_compras["valor_total"].sum() if not df_compras.empty and "valor_total" in df_compras.columns else 0.0
     
     total_saidas = total_despesas + total_compras
     saldo_caixa = total_faturado - total_saidas
@@ -115,6 +115,11 @@ elif opcao == "Fornecedores":
     conn = sqlite3.connect(DB_FILE)
     df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
     conn.close()
+    
+    pesquisa_forn = st.text_input("🔍 Pesquisar Fornecedor")
+    if pesquisa_forn and not df_forn.empty:
+        df_forn = df_forn[df_forn['fornecedor'].str.contains(pesquisa_forn, case=False, na=False)]
+        
     st.dataframe(df_forn, use_container_width=True)
     
     if not df_forn.empty:
@@ -193,9 +198,15 @@ elif opcao == "Clientes":
                 conn.close()
                 st.success("Cliente cadastrado!")
                 st.rerun()
+    
     conn = sqlite3.connect(DB_FILE)
     df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
     conn.close()
+    
+    pesquisa_cli = st.text_input("🔍 Pesquisar Cliente")
+    if pesquisa_cli and not df_cli.empty:
+        df_cli = df_cli[df_cli['nome'].str.contains(pesquisa_cli, case=False, na=False)]
+
     st.dataframe(df_cli, use_container_width=True)
 
     if not df_cli.empty:
@@ -250,18 +261,20 @@ elif opcao == "Financeiro":
     st.title("Controle Financeiro (Consolidado)")
     
     conn = sqlite3.connect(DB_FILE)
-    df_v = pd.read_sql_query("SELECT id, data_venda as data, produto, valor_total FROM vendas", conn)
-    df_c = pd.read_sql_query("SELECT id, data_compra as data, produto, valor_total FROM compras", conn)
-    df_d = pd.read_sql_query("SELECT id, data_desp as data, descricao, valor FROM despesas", conn)
+    tabelas_existentes = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    
+    df_v = pd.read_sql_query("SELECT id, data_venda as data, produto as descricao, valor_total as valor FROM vendas", conn) if "vendas" in tabelas_existentes else pd.DataFrame()
+    df_c = pd.read_sql_query("SELECT id, data_compra as data, produto as descricao, valor_total as valor FROM compras", conn) if "compras" in tabelas_existentes else pd.DataFrame()
+    df_d = pd.read_sql_query("SELECT id, data_desp as data, descricao, valor FROM despesas", conn) if "despesas" in tabelas_existentes else pd.DataFrame()
     conn.close()
     
     lista_mov = []
     if not df_v.empty:
         for _, r in df_v.iterrows():
-            lista_mov.append({"ID Original": r["id"], "Origem": "Vendas", "Data": r["data"], "Descrição": f"Venda: {r['produto']}", "Tipo": "Entrada", "Valor": r["valor_total"]})
+            lista_mov.append({"ID Original": r["id"], "Origem": "Vendas", "Data": r["data"], "Descrição": f"Venda: {r['descricao']}", "Tipo": "Entrada", "Valor": r["valor"]})
     if not df_c.empty:
         for _, r in df_c.iterrows():
-            lista_mov.append({"ID Original": r["id"], "Origem": "Compras", "Data": r["data"], "Descrição": f"Compra: {r['produto']}", "Tipo": "Saída", "Valor": r["valor_total"]})
+            lista_mov.append({"ID Original": r["id"], "Origem": "Compras", "Data": r["data"], "Descrição": f"Compra: {r['descricao']}", "Tipo": "Saída", "Valor": r["valor"]})
     if not df_d.empty:
         for _, r in df_d.iterrows():
             lista_mov.append({"ID Original": r["id"], "Origem": "Despesas", "Data": r["data"], "Descrição": f"Despesa: {r['descricao']}", "Tipo": "Saída", "Valor": r["valor"]})
@@ -300,7 +313,7 @@ elif opcao == "Despesas Gerais":
                 st.success("Despesa registrada!")
                 st.rerun()
     conn = sqlite3.connect(DB_FILE)
-    df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
+    df_esp = pd.read_sql_query("SELECT * FROM despesas", conn) if "despesas" in [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()] else pd.DataFrame()
     conn.close()
     st.dataframe(df_esp, use_container_width=True)
 
@@ -338,15 +351,27 @@ elif opcao == "Contas a Pagar":
     st.dataframe(df_cp, use_container_width=True)
 
     if not df_cp.empty:
-        with st.form("del_cp"):
-            id_del = st.number_input("Digite o ID para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Conta a Pagar"):
-                conn = sqlite3.connect(DB_FILE)
-                conn.execute("DELETE FROM contas_pagar WHERE id = ?", (id_del,))
-                conn.commit()
-                conn.close()
-                st.success(f"Conta ID {id_del} excluída!")
-                st.rerun()
+        col_A, col_B = st.columns(2)
+        with col_A:
+            with st.form("baixa_cp"):
+                id_baixa = st.number_input("ID para dar Baixa (Pago)", min_value=1, step=1)
+                if st.form_submit_button("Marcar como Pago"):
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("UPDATE contas_pagar SET status = 'Pago' WHERE id = ?", (id_baixa,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Conta ID {id_baixa} atualizada para Pago!")
+                    st.rerun()
+        with col_B:
+            with st.form("del_cp"):
+                id_del = st.number_input("ID para Excluir", min_value=1, step=1)
+                if st.form_submit_button("Excluir Conta a Pagar"):
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("DELETE FROM contas_pagar WHERE id = ?", (id_del,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Conta ID {id_del} excluída!")
+                    st.rerun()
 
 # 10. CONTAS A RECEBER
 elif opcao == "Contas a Receber":
@@ -371,15 +396,27 @@ elif opcao == "Contas a Receber":
     st.dataframe(df_cr, use_container_width=True)
 
     if not df_cr.empty:
-        with st.form("del_cr"):
-            id_del = st.number_input("Digite o ID para excluir", min_value=1, step=1)
-            if st.form_submit_button("Excluir Conta a Receber"):
-                conn = sqlite3.connect(DB_FILE)
-                conn.execute("DELETE FROM contas_receber WHERE id = ?", (id_del,))
-                conn.commit()
-                conn.close()
-                st.success(f"Conta ID {id_del} excluída!")
-                st.rerun()
+        col_A, col_B = st.columns(2)
+        with col_A:
+            with st.form("baixa_cr"):
+                id_baixa = st.number_input("ID para dar Baixa (Recebido)", min_value=1, step=1)
+                if st.form_submit_button("Marcar como Recebido"):
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("UPDATE contas_receber SET status = 'Recebido' WHERE id = ?", (id_baixa,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Conta ID {id_baixa} atualizada para Recebido!")
+                    st.rerun()
+        with col_B:
+            with st.form("del_cr"):
+                id_del = st.number_input("ID para Excluir", min_value=1, step=1)
+                if st.form_submit_button("Excluir Conta a Receber"):
+                    conn = sqlite3.connect(DB_FILE)
+                    conn.execute("DELETE FROM contas_receber WHERE id = ?", (id_del,))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Conta ID {id_del} excluída!")
+                    st.rerun()
 
 # 11. ENTREGAS
 elif opcao == "Entregas":
@@ -419,20 +456,21 @@ elif opcao == "Relatórios":
     st.title("Relatórios e Indicadores Gerenciais")
     
     conn = sqlite3.connect(DB_FILE)
-    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
-    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
-    df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
+    tabelas_existentes = [row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn) if "vendas" in tabelas_existentes else pd.DataFrame()
+    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn) if "despesas" in tabelas_existentes else pd.DataFrame()
+    df_compras = pd.read_sql_query("SELECT * FROM compras", conn) if "compras" in tabelas_existentes else pd.DataFrame()
     conn.close()
     
     st.subheader("📊 Resumo Consolidado")
     c1, c2, c3 = st.columns(3)
     c1.metric("Total de Vendas Registradas", len(df_vendas))
-    c2.metric("Total de Despesas", f"R$ {df_despesas['valor'].sum() if not df_despesas.empty else 0.0:,.2f}")
-    c3.metric("Total em Compras", f"R$ {df_compras['valor_total'].sum() if not df_compras.empty else 0.0:,.2f}")
+    c2.metric("Total de Despesas", f"R$ {df_despesas['valor'].sum() if not df_despesas.empty and 'valor' in df_despesas.columns else 0.0:,.2f}")
+    c3.metric("Total em Compras", f"R$ {df_compras['valor_total'].sum() if not df_compras.empty and 'valor_total' in df_compras.columns else 0.0:,.2f}")
         
     st.markdown("---")
     st.subheader("📦 Vendas por Produto")
-    if not df_vendas.empty:
+    if not df_vendas.empty and "produto" in df_vendas.columns:
         df_vendas_resumo = df_vendas.groupby("produto")[["qtd_kg", "valor_total"]].sum().reset_index()
         st.dataframe(df_vendas_resumo, use_container_width=True)
     else:
