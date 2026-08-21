@@ -88,28 +88,69 @@ def renderizar_tabela_editavel(tabela, nome_exibicao):
         finally:
             conn.close()
 
-# 1. PAINEL GERAL
-if opcao == "Painel Geral":
-    st.title("Painel Geral de Gestão")
-    
+# --- Função para unificar o fluxo financeiro com Vendas, Compras, Despesas, Contas a Pagar e Contas a Receber ---
+def obter_extrato_financeiro_unificado():
     conn = sqlite3.connect(DB_FILE)
-    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
-    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
-    df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
+    
+    try:
+        df_v = pd.read_sql_query("SELECT data_venda as data, 'Venda: ' || produto || ' (Cliente: ' || cliente || ')' as descricao, 'Entrada' as tipo, valor_total as valor FROM vendas", conn)
+    except:
+        df_v = pd.DataFrame(columns=["data", "descricao", "tipo", "valor"])
+        
+    try:
+        df_c = pd.read_sql_query("SELECT data_compra as data, 'Compra Produto: ' || produto as descricao, 'Saída' as tipo, valor_total as valor FROM compras", conn)
+    except:
+        df_c = pd.DataFrame(columns=["data", "descricao", "tipo", "valor"])
+        
+    try:
+        df_d = pd.read_sql_query("SELECT data_desp as data, 'Despesa [' || categoria || ']: ' || descricao as descricao, 'Saída' as tipo, valor as valor FROM despesas", conn)
+    except:
+        df_d = pd.DataFrame(columns=["data", "descricao", "tipo", "valor"])
+
+    try:
+        df_cp = pd.read_sql_query("SELECT vencimento as data, 'Conta a Pagar [' || status || ']: ' || fornecedor || ' - ' || descricao as descricao, 'Saída' as tipo, valor as valor FROM contas_pagar", conn)
+    except:
+        df_cp = pd.DataFrame(columns=["data", "descricao", "tipo", "valor"])
+
+    try:
+        df_cr = pd.read_sql_query("SELECT vencimento as data, 'Conta a Receber [' || status || ']: ' || cliente || ' - ' || descricao as descricao, 'Entrada' as tipo, valor as valor FROM contas_receber", conn)
+    except:
+        df_cr = pd.DataFrame(columns=["data", "descricao", "tipo", "valor"])
+        
+    try:
+        df_f = pd.read_sql_query("SELECT data_mov as data, descricao, tipo, valor FROM financeiro", conn)
+    except:
+        df_f = pd.DataFrame(columns=["data", "descricao", "tipo", "valor"])
+        
     conn.close()
     
-    total_faturado = df_vendas["valor_total"].sum() if not df_vendas.empty else 0.0
-    total_despesas = df_despesas["valor"].sum() if not df_despesas.empty else 0.0
-    total_compras = df_compras["valor_total"].sum() if not df_compras.empty else 0.0
+    df_total = pd.concat([df_v, df_c, df_d, df_cp, df_cr, df_f], ignore_index=True)
+    if not df_total.empty and "data" in df_total.columns:
+        df_total["data"] = pd.to_datetime(df_total["data"], errors="coerce")
+        df_total = df_total.sort_values(by="data", ascending=False)
+        df_total["data"] = df_total["data"].dt.strftime("%Y-%m-%d")
+        
+    return df_total
+
+# 1. PAINEL GERAL
+if opcao == "Painel Geral":
+    st.title("Painel Geral de Gestão (Integrado)")
     
-    total_saidas = total_despesas + total_compras
-    saldo_caixa = total_faturado - total_saidas
+    df_extrato = obter_extrato_financeiro_unificado()
+    
+    total_entradas = df_extrato[df_extrato["tipo"] == "Entrada"]["valor"].sum() if not df_extrato.empty else 0.0
+    total_saidas = df_extrato[df_extrato["tipo"] == "Saída"]["valor"].sum() if not df_extrato.empty else 0.0
+    saldo_caixa = total_entradas - total_saidas
+    
+    conn = sqlite3.connect(DB_FILE)
+    df_vendas_qtd = pd.read_sql_query("SELECT * FROM vendas", conn)
+    conn.close()
     
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Faturamento (Vendas)", f"R$ {total_faturado:,.2f}")
-    col2.metric("Total Gastos (Compra+Desp)", f"R$ {total_saidas:,.2f}")
-    col3.metric("Saldo em Caixa", f"R$ {saldo_caixa:,.2f}")
-    col4.metric("Qtd Vendas", f"{len(df_vendas)}")
+    col1.metric("Total Entradas (Vendas+Receber)", f"R$ {total_entradas:,.2f}")
+    col2.metric("Total Saídas (Compras+Desp+Pagar)", f"R$ {total_saidas:,.2f}")
+    col3.metric("Saldo em Caixa Consolidado", f"R$ {saldo_caixa:,.2f}")
+    col4.metric("Qtd Vendas", f"{len(df_vendas_qtd)}")
 
 # 2. FORNECEDORES
 elif opcao == "Fornecedores":
@@ -148,25 +189,29 @@ elif opcao == "Vendas":
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
-    st.title("Controle Financeiro")
+    st.title("Controle Financeiro Integrado")
+    st.markdown("O extrato abaixo reúne automaticamente todas as **Vendas**, **Compras**, **Despesas**, **Contas a Pagar** e **Contas a Receber**, além das movimentações manuais.")
     
-    conn = sqlite3.connect(DB_FILE)
-    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
-    conn.close()
+    df_extrato = obter_extrato_financeiro_unificado()
     
-    if not df_fin.empty:
-        total_entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum()
-        total_saidas = df_fin[df_fin["tipo"] == "Saída"]["valor"].sum()
+    if not df_extrato.empty:
+        total_entradas = df_extrato[df_extrato["tipo"] == "Entrada"]["valor"].sum()
+        total_saidas = df_extrato[df_extrato["tipo"] == "Saída"]["valor"].sum()
         saldo_caixa = total_entradas - total_saidas
         
         col1, col2, col3 = st.columns(3)
-        col1.metric("Entradas", f"R$ {total_entradas:,.2f}")
-        col2.metric("Saídas", f"R$ {total_saidas:,.2f}")
-        col3.metric("Saldo Líquido", f"R$ {saldo_caixa:,.2f}")
+        col1.metric("Entradas Totais", f"R$ {total_entradas:,.2f}")
+        col2.metric("Saídas Totais", f"R$ {total_saidas:,.2f}")
+        col3.metric("Saldo Líquido Consolidado", f"R$ {saldo_caixa:,.2f}")
         
         st.markdown("---")
-    
-    renderizar_tabela_editavel("financeiro", "Movimentações Financeiras")
+        st.subheader("Extrato Consolidado Geral")
+        st.dataframe(df_extrato, use_container_width=True)
+    else:
+        st.info("Nenhuma movimentação encontrada no sistema.")
+        
+    st.markdown("---")
+    renderizar_tabela_editavel("financeiro", "Movimentações Manuais Adicionais")
 
 # 8. DESPESAS GERAIS
 elif opcao == "Despesas Gerais":
@@ -192,11 +237,11 @@ elif opcao == "Entregas":
 elif opcao == "Relatórios":
     st.title("Relatórios e Indicadores Gerenciais")
     
+    df_extrato = obter_extrato_financeiro_unificado()
     conn = sqlite3.connect(DB_FILE)
     df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
     df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
     df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
-    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
     
     st.subheader("📊 Resumo Consolidado")
@@ -206,9 +251,9 @@ elif opcao == "Relatórios":
     c3.metric("Total em Compras", f"R$ {df_compras['valor_total'].sum() if not df_compras.empty else 0.0:,.2f}")
     
     st.markdown("---")
-    st.subheader("📋 Extrato Financeiro Completo (Entradas e Saídas)")
-    if not df_fin.empty:
-        st.dataframe(df_fin, use_container_width=True)
+    st.subheader("📋 Extrato Financeiro Completo Integrado")
+    if not df_extrato.empty:
+        st.dataframe(df_extrato, use_container_width=True)
     else:
         st.info("Nenhuma movimentação financeira registrada.")
         
