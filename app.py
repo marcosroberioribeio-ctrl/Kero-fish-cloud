@@ -64,65 +64,27 @@ opcao = st.sidebar.radio(
     ]
 )
 
-# --- Funções auxiliares de Edição e Exclusão ---
-
-def secao_edicao(tabela, df, colunas_editaveis, coluna_rotulo):
-    if df.empty:
-        return
-    st.markdown("---")
-    st.subheader(f"✏️ Editar Registro ({tabela})")
-    
-    opcoes = {f"ID {row['id']} - {row[coluna_rotulo]}": row['id'] for _, row in df.iterrows()}
-    selected_label = st.selectbox(f"Selecione o item para editar ({tabela}):", list(opcoes.keys()), key=f"edit_sel_{tabela}")
-    id_selecionado = opcoes[selected_label]
+# --- Função genérica para Grid Editável (Salvar alterações na tabela) ---
+def renderizar_tabela_editavel(tabela, nome_exibicao):
+    st.subheader(f"Gerenciamento de {nome_exibicao}")
+    st.info("💡 Você pode editar os dados diretamente na tabela abaixo ou excluir linhas selecionando-as. Clique em 'Salvar Alterações' para gravar no banco.")
     
     conn = sqlite3.connect(DB_FILE)
-    registro = pd.read_sql_query(f"SELECT * FROM {tabela} WHERE id = ?", conn, params=(id_selecionado,))
+    df = pd.read_sql_query(f"SELECT * FROM {tabela}", conn)
     conn.close()
     
-    if not registro.empty:
-        row = registro.iloc[0]
-        with st.form(f"form_edit_{tabela}"):
-            novos_dados = {}
-            for col in colunas_editaveis:
-                val_atual = row[col] if pd.notna(row[col]) else ""
-                novos_dados[col] = st.text_input(f"Editar {col}", value=str(val_atual))
-            
-            if st.form_submit_button(f"Salvar Alterações ({tabela})"):
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                try:
-                    set_clause = ", ".join([f"{col} = ?" for col in colunas_editaveis])
-                    params = [novos_dados[col] for col in colunas_editaveis] + [id_selecionado]
-                    c.execute(f"UPDATE {tabela} SET {set_clause} WHERE id = ?", params)
-                    conn.commit()
-                    st.success("Registro atualizado com sucesso!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao atualizar: {e}")
-                finally:
-                    conn.close()
-
-def secao_exclusao(tabela, df, coluna_rotulo):
-    if df.empty:
-        return
-    st.markdown("---")
-    st.subheader(f"🗑️ Excluir Registro ({tabela})")
+    # st.data_editor permite edição direta, adição e exclusão de linhas
+    df_editado = st.data_editor(df, num_rows="dynamic", key=f"editor_{tabela}", use_container_width=True)
     
-    opcoes_delecao = {f"ID {row['id']} - {row[coluna_rotulo]}": row['id'] for _, row in df.iterrows()}
-    selected_label = st.selectbox(f"Selecione o item para excluir ({tabela}):", list(opcoes_delecao.keys()), key=f"del_{tabela}")
-    
-    if st.button(f"Confirmar Exclusão ({tabela})", key=f"btn_del_{tabela}"):
-        id_para_deletar = opcoes_delecao[selected_label]
+    if st.button(f"💾 Salvar Alterações em {nome_exibicao}", key=f"btn_save_{tabela}"):
         conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
         try:
-            c.execute(f"DELETE FROM {tabela} WHERE id = ?", (id_para_deletar,))
-            conn.commit()
-            st.success(f"Registro ID {id_para_deletar} excluído com sucesso!")
+            # Substitui os dados da tabela com base no DataFrame editado na tela
+            df_editado.to_sql(tabela, conn, if_exists="replace", index=False)
+            st.success(f"Alterações em {nome_exibicao} salvas com sucesso!")
             st.rerun()
         except Exception as e:
-            st.error(f"Erro ao deletar: {e}")
+            st.error(f"Erro ao salvar os dados: {e}")
         finally:
             conn.close()
 
@@ -152,60 +114,12 @@ if opcao == "Painel Geral":
 # 2. FORNECEDORES
 elif opcao == "Fornecedores":
     st.title("Gestão de Fornecedores")
-    with st.form("form_fornecedor", clear_on_submit=True):
-        f_nome = st.text_input("Nome do Fornecedor")
-        f_contato = st.text_input("Contato / Responsável")
-        f_tel = st.text_input("Telefone")
-        f_end = st.text_input("Endereço")
-        f_prod = st.text_input("Produtos Fornecidos")
-        f_prazo = st.text_input("Prazo de Pagamento")
-        f_obs = st.text_input("Observações")
-        if st.form_submit_button("Cadastrar Fornecedor"):
-            if f_nome:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone, endereco, produto_fornecido, prazo_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          (f_nome, f_contato, f_tel, f_end, f_prod, f_prazo, f_obs))
-                conn.commit()
-                conn.close()
-                st.success("Fornecedor cadastrado com sucesso!")
-                st.rerun()
-            else:
-                st.error("O nome do fornecedor é obrigatório.")
-
-    st.subheader("Lista de Fornecedores")
-    conn = sqlite3.connect(DB_FILE)
-    df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
-    conn.close()
-    st.dataframe(df_forn, use_container_width=True)
-    secao_edicao("fornecedores", df_forn, ["fornecedor", "contato", "telefone", "endereco", "produto_fornecido", "prazo_pagamento", "observacoes"], "fornecedor")
-    secao_exclusao("fornecedores", df_forn, "fornecedor")
+    renderizar_tabela_editavel("fornecedores", "Fornecedores")
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
     st.title("Compras de Produtos e Histórico")
-    with st.form("form_compra", clear_on_submit=True):
-        prod = st.selectbox("Selecione o Produto", LISTA_PRODUTOS_MESTRA)
-        qtd = st.number_input("Quantidade (KG/Unid)", min_value=0.1)
-        val = st.number_input("Valor Total R$", min_value=0.0)
-        if st.form_submit_button("Registrar Compra"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            hoje = datetime.now().strftime("%Y-%m-%d")
-            c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)", (prod, qtd, val, hoje))
-            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Compra: {prod}", "Saída", val, hoje))
-            conn.commit()
-            conn.close()
-            st.success("Compra registrada com sucesso!")
-            st.rerun()
-
-    st.subheader("Histórico de Compras")
-    conn = sqlite3.connect(DB_FILE)
-    df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
-    conn.close()
-    st.dataframe(df_compras_db, use_container_width=True)
-    secao_edicao("compras", df_compras_db, ["produto", "qtd", "valor_total"], "produto")
-    secao_exclusao("compras", df_compras_db, "produto")
+    renderizar_tabela_editavel("compras", "Compras")
 
 # 4. ESTOQUE
 elif opcao == "Estoque":
@@ -225,53 +139,12 @@ elif opcao == "Estoque":
 # 5. CLIENTES
 elif opcao == "Clientes":
     st.title("Cadastro e Gestão de Clientes")
-    with st.form("form_cliente", clear_on_submit=True):
-        nome_cli = st.text_input("Nome do Cliente")
-        tel_cli = st.text_input("Telefone")
-        cidade_cli = st.text_input("Cidade")
-        if st.form_submit_button("Cadastrar Cliente"):
-            if nome_cli:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                c.execute("INSERT INTO clientes (nome, telefone, cidade, data_cad) VALUES (?, ?, ?, ?)", (nome_cli, tel_cli, cidade_cli, datetime.now().strftime("%Y-%m-%d")))
-                conn.commit()
-                conn.close()
-                st.success("Cliente cadastrado!")
-                st.rerun()
-    conn = sqlite3.connect(DB_FILE)
-    df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
-    conn.close()
-    st.dataframe(df_cli, use_container_width=True)
-    secao_edicao("clientes", df_cli, ["nome", "telefone", "cidade"], "nome")
-    secao_exclusao("clientes", df_cli, "nome")
+    renderizar_tabela_editavel("clientes", "Clientes")
 
 # 6. VENDAS
 elif opcao == "Vendas":
-    st.title("Registrar Venda e Histórico")
-    with st.form("form_venda", clear_on_submit=True):
-        cliente_nome = st.text_input("Nome do Cliente")
-        produto_sel = st.selectbox("Produto", LISTA_PRODUTOS_MESTRA)
-        qtd_kg = st.number_input("Quantidade", min_value=0.1, format="%.2f")
-        preco_unit = st.number_input("Preço Unitário / KG (R$)", min_value=0.0, format="%.2f")
-        
-        if st.form_submit_button("Finalizar Venda"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            val_tot = qtd_kg * preco_unit
-            c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                      (cliente_nome if cliente_nome else "Balcão", produto_sel, qtd_kg, val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Venda: {produto_sel}", "Entrada", val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-            conn.commit()
-            conn.close()
-            st.success("Venda realizada!")
-            st.rerun()
-
-    conn = sqlite3.connect(DB_FILE)
-    df_vendas_db = pd.read_sql_query("SELECT * FROM vendas", conn)
-    conn.close()
-    st.dataframe(df_vendas_db, use_container_width=True)
-    secao_edicao("vendas", df_vendas_db, ["cliente", "produto", "qtd_kg", "valor_total"], "produto")
-    secao_exclusao("vendas", df_vendas_db, "produto")
+    st.title("Registro de Vendas e Histórico")
+    renderizar_tabela_editavel("vendas", "Vendas")
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
@@ -292,107 +165,28 @@ elif opcao == "Financeiro":
         col3.metric("Saldo Líquido", f"R$ {saldo_caixa:,.2f}")
         
         st.markdown("---")
-        st.dataframe(df_fin, use_container_width=True)
-        secao_edicao("financeiro", df_fin, ["descricao", "tipo", "valor"], "descricao")
-        secao_exclusao("financeiro", df_fin, "descricao")
-    else:
-        st.info("Nenhuma movimentação financeira registrada.")
+    
+    renderizar_tabela_editavel("financeiro", "Movimentações Financeiras")
 
 # 8. DESPESAS GERAIS
 elif opcao == "Despesas Gerais":
     st.title("Registro de Despesas Gerais")
-    with st.form("form_despesa", clear_on_submit=True):
-        desc_esp = st.text_input("Descrição da Despesa")
-        val_esp = st.number_input("Valor R$", min_value=0.0)
-        if st.form_submit_button("Registrar Despesa"):
-            if desc_esp and val_esp > 0:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                hoje = datetime.now().strftime("%Y-%m-%d")
-                c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (hoje, "Geral", desc_esp, val_esp, "Dinheiro"))
-                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc_esp}", "Saída", val_esp, hoje))
-                conn.commit()
-                conn.close()
-                st.success("Despesa registrada!")
-                st.rerun()
-    conn = sqlite3.connect(DB_FILE)
-    df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
-    conn.close()
-    st.dataframe(df_esp, use_container_width=True)
-    secao_edicao("despesas", df_esp, ["categoria", "descricao", "valor", "pagamento"], "descricao")
-    secao_exclusao("despesas", df_esp, "descricao")
+    renderizar_tabela_editavel("despesas", "Despesas")
 
 # 9. CONTAS A PAGAR
 elif opcao == "Contas a Pagar":
     st.title("Contas a Pagar")
-    with st.form("form_pagar", clear_on_submit=True):
-        forn = st.text_input("Fornecedor")
-        desc = st.text_input("Descrição")
-        val = st.number_input("Valor R$", min_value=0.0)
-        venc = st.date_input("Vencimento")
-        if st.form_submit_button("Lançar Conta"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute("INSERT INTO contas_pagar (fornecedor, descricao, valor, vencimento, status) VALUES (?, ?, ?, ?, ?)", 
-                      (forn, desc, val, str(venc), "Pendente"))
-            conn.commit()
-            conn.close()
-            st.success("Conta a pagar lançada com sucesso!")
-            st.rerun()
-    conn = sqlite3.connect(DB_FILE)
-    df_cp = pd.read_sql_query("SELECT * FROM contas_pagar", conn)
-    conn.close()
-    st.dataframe(df_cp, use_container_width=True)
-    secao_edicao("contas_pagar", df_cp, ["fornecedor", "descricao", "valor", "status"], "fornecedor")
-    secao_exclusao("contas_pagar", df_cp, "fornecedor")
+    renderizar_tabela_editavel("contas_pagar", "Contas a Pagar")
 
 # 10. CONTAS A RECEBER
 elif opcao == "Contas a Receber":
     st.title("Contas a Receber")
-    with st.form("form_receber", clear_on_submit=True):
-        cli = st.text_input("Cliente")
-        desc = st.text_input("Descrição")
-        val = st.number_input("Valor R$", min_value=0.0)
-        venc = st.date_input("Vencimento")
-        if st.form_submit_button("Lançar Recebimento"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute("INSERT INTO contas_receber (cliente, descricao, valor, vencimento, status) VALUES (?, ?, ?, ?, ?)", 
-                      (cli, desc, val, str(venc), "Pendente"))
-            conn.commit()
-            conn.close()
-            st.success("Conta a receber lançada com sucesso!")
-            st.rerun()
-    conn = sqlite3.connect(DB_FILE)
-    df_cr = pd.read_sql_query("SELECT * FROM contas_receber", conn)
-    conn.close()
-    st.dataframe(df_cr, use_container_width=True)
-    secao_edicao("contas_receber", df_cr, ["cliente", "descricao", "valor", "status"], "cliente")
-    secao_exclusao("contas_receber", df_cr, "cliente")
+    renderizar_tabela_editavel("contas_receber", "Contas a Receber")
 
 # 11. ENTREGAS
 elif opcao == "Entregas":
     st.title("Controle de Entregas")
-    with st.form("form_entrega", clear_on_submit=True):
-        ped = st.text_input("Pedido")
-        bair = st.text_input("Bairro")
-        ent = st.text_input("Entregador")
-        taxa = st.number_input("Taxa de Entrega R$", min_value=0.0)
-        if st.form_submit_button("Registrar Entrega"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            c.execute("INSERT INTO entregas (data_ent, pedido, bairro, entregador, taxa_entrega) VALUES (?, ?, ?, ?, ?)", 
-                      (datetime.now().strftime("%Y-%m-%d"), ped, bair, ent, taxa))
-            conn.commit()
-            conn.close()
-            st.success("Entrega registrada com sucesso!")
-            st.rerun()
-    conn = sqlite3.connect(DB_FILE)
-    df_ent = pd.read_sql_query("SELECT * FROM entregas", conn)
-    conn.close()
-    st.dataframe(df_ent, use_container_width=True)
-    secao_edicao("entregas", df_ent, ["pedido", "bairro", "entregador", "taxa_entrega"], "pedido")
-    secao_exclusao("entregas", df_ent, "pedido")
+    renderizar_tabela_editavel("entregas", "Entregas")
 
 # 12. RELATÓRIOS
 elif opcao == "Relatórios":
