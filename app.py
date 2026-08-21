@@ -10,10 +10,10 @@ Principais melhorias:
 - Compras com fornecedor, custo/kg, pagamento e validade
 - Vendas com pedido, preço/kg, desconto e pagamento
 - Pagamentos: Pago / Pendente / Parcial
-- Contas a pagar e receber sem dupla contagem no caixa realizado
+- Financeiro integrado a compras, vendas, despesas, contas a pagar e contas a receber
 - Estoque por entradas, vendas, perdas e ajustes
 - Estoque mínimo e alertas
-- Fluxo de caixa realizado x previsto
+- Fluxo de caixa realizado x previsto, com saldo de contas parciais
 - Lucro bruto e líquido
 - Entregas integradas ao pedido
 - Backup e restauração do banco
@@ -309,6 +309,10 @@ def init_db():
     add_column_if_missing(conn, "financeiro", "origem_tipo", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "financeiro", "origem_id", "INTEGER")
 
+    # Controle do que já foi pago/recebido em contas parciais.
+    add_column_if_missing(conn, "contas_pagar", "valor_pago", "REAL DEFAULT 0")
+    add_column_if_missing(conn, "contas_receber", "valor_recebido", "REAL DEFAULT 0")
+
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_produtos_nome ON produtos(nome)")
     conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_vendas_pedido ON vendas(pedido) WHERE pedido IS NOT NULL")
 
@@ -398,15 +402,63 @@ def get_produtos():
 
 
 def estoque_produto(produto):
-    entrada = scalar(
-        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND tipo IN ('Entrada','Ajuste Entrada')",
+    """Calcula o estoque real diretamente a partir das compras e vendas.
+
+    Compras = entradas; vendas = saídas. Ajustes/perdas manuais continuam
+    vindo da tabela de movimentos_estoque. Isso também corrige estoques
+    históricos quando compras/vendas antigas não possuem movimento gravado.
+    """
+    compras = scalar(
+        "SELECT COALESCE(SUM(qtd),0) FROM compras WHERE produto=?",
         (produto,),
     )
-    saida = scalar(
-        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND tipo IN ('Saída','Perda','Ajuste Saída')",
+    vendas = scalar(
+        "SELECT COALESCE(SUM(qtd_kg),0) FROM vendas WHERE produto=?",
         (produto,),
     )
-    return float(entrada or 0) - float(saida or 0)
+    ajustes_entrada = scalar(
+        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque "
+        "WHERE produto=? AND origem_tipo='manual' AND tipo='Ajuste Entrada'",
+        (produto,),
+    )
+    ajustes_saida = scalar(
+        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque "
+        "WHERE produto=? AND origem_tipo='manual' AND tipo IN ('Ajuste Saída','Perda')",
+        (produto,),
+    )
+    return float(compras or 0) - float(vendas or 0) + float(ajustes_entrada or 0) - float(ajustes_saida or 0)
+
+
+def resumo_estoque():
+    """Retorna o estoque por produto, sempre baseado em compras - vendas + ajustes."""
+    produtos = get_produtos()
+    registros = []
+    for _, r in produtos.iterrows():
+        produto = r["nome"]
+        compras = float(scalar("SELECT COALESCE(SUM(qtd),0) FROM compras WHERE produto=?", (produto,)) or 0)
+        vendas = float(scalar("SELECT COALESCE(SUM(qtd_kg),0) FROM vendas WHERE produto=?", (produto,)) or 0)
+        ajuste_ent = float(scalar(
+            "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND origem_tipo='manual' AND tipo='Ajuste Entrada'",
+            (produto,)
+        ) or 0)
+        ajuste_saida = float(scalar(
+            "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND origem_tipo='manual' AND tipo IN ('Ajuste Saída','Perda')",
+            (produto,)
+        ) or 0)
+        estoque = compras - vendas + ajuste_ent - ajuste_saida
+        minimo = float(r["estoque_minimo"] or 0)
+        registros.append({
+            "Produto": produto,
+            "Categoria": r["categoria"],
+            "Compras": compras,
+            "Vendas": vendas,
+            "Ajustes +": ajuste_ent,
+            "Ajustes -": ajuste_saida,
+            "Estoque atual": estoque,
+            "Mínimo": minimo,
+            "Situação": "⚠️ BAIXO" if estoque <= minimo else "OK",
+        })
+    return pd.DataFrame(registros)
 
 
 def registrar_movimento(produto, tipo, quantidade, custo=0, origem_tipo="", origem_id=None, observacoes=""):
@@ -435,31 +487,51 @@ def registrar_financeiro(data_mov, descricao, tipo, valor, forma_pagamento="", o
     conn.close()
 
 
-def garantir_conta_pagar(fornecedor, descricao, valor, vencimento, origem_tipo="", origem_id=None):
+def garantir_conta_pagar(fornecedor, descricao, valor, vencimento, origem_tipo="", origem_id=None, valor_pago=0):
+    valor = float(valor or 0)
+    valor_pago = min(max(float(valor_pago or 0), 0), valor)
+    if valor <= 0:
+        return None
+
+    status = "Pago" if valor_pago >= valor else ("Parcial" if valor_pago > 0 else "Pendente")
     conn = get_conn()
-    conn.execute("""
+    cur = conn.execute("""
         INSERT INTO contas_pagar
-        (fornecedor, descricao, valor, vencimento, status, origem_tipo, origem_id)
-        VALUES (?, ?, ?, ?, 'Pendente', ?, ?)
-    """, (fornecedor, descricao, valor, vencimento, origem_tipo, origem_id))
+        (fornecedor, descricao, valor, valor_pago, vencimento, status, origem_tipo, origem_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (fornecedor, descricao, valor, valor_pago, vencimento, status, origem_tipo, origem_id))
+    conta_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return conta_id
 
 
-def garantir_conta_receber(cliente, descricao, valor, vencimento, origem_tipo="", origem_id=None):
+
+def garantir_conta_receber(cliente, descricao, valor, vencimento, origem_tipo="", origem_id=None, valor_recebido=0):
+    valor = float(valor or 0)
+    valor_recebido = min(max(float(valor_recebido or 0), 0), valor)
+    if valor <= 0:
+        return None
+
+    status = "Pago" if valor_recebido >= valor else ("Parcial" if valor_recebido > 0 else "Pendente")
     conn = get_conn()
-    conn.execute("""
+    cur = conn.execute("""
         INSERT INTO contas_receber
-        (cliente, descricao, valor, vencimento, status, origem_tipo, origem_id)
-        VALUES (?, ?, ?, ?, 'Pendente', ?, ?)
-    """, (cliente, descricao, valor, vencimento, origem_tipo, origem_id))
+        (cliente, descricao, valor, valor_recebido, vencimento, status, origem_tipo, origem_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (cliente, descricao, valor, valor_recebido, vencimento, status, origem_tipo, origem_id))
+    conta_id = cur.lastrowid
     conn.commit()
     conn.close()
+    return conta_id
+
 
 
 def registrar_compra(fornecedor, produto, qtd, preco_kg, data_compra, lote, validade,
                      forma, status, vencimento, observacoes):
-    total = qtd * preco_kg
+    total = float(qtd) * float(preco_kg)
+    status = status if status in STATUS_PAGAMENTO else "Pendente"
+
     conn = get_conn()
     cur = conn.execute("""
         INSERT INTO compras
@@ -474,21 +546,33 @@ def registrar_compra(fornecedor, produto, qtd, preco_kg, data_compra, lote, vali
 
     registrar_movimento(produto, "Entrada", qtd, preco_kg, "compra", compra_id, f"Lote: {lote}")
 
+    # COMPRA -> FINANCEIRO ou CONTAS A PAGAR
     if status == "Pago":
-        registrar_financeiro(data_compra, f"Compra: {produto}", "Saída", total, forma, "compra", compra_id)
+        registrar_financeiro(
+            data_compra, f"Compra #{compra_id}: {produto}", "Saída",
+            total, forma, "compra", compra_id
+        )
     else:
-        garantir_conta_pagar(fornecedor, f"Compra: {produto}", total, vencimento or data_compra, "compra", compra_id)
+        garantir_conta_pagar(
+            fornecedor, f"Compra #{compra_id}: {produto}", total,
+            vencimento or data_compra, "compra", compra_id
+        )
+
 
 
 def registrar_venda(pedido, cliente, produto, qtd, preco_kg, desconto, data_venda,
                     forma, status, recebido, vencimento, observacoes):
-    bruto = qtd * preco_kg
-    total = max(0.0, bruto - desconto)
-    recebido = min(max(float(recebido), 0.0), total)
-    pendente = total - recebido
+    bruto = float(qtd) * float(preco_kg)
+    total = max(0.0, bruto - float(desconto or 0))
+    recebido = min(max(float(recebido or 0), 0.0), total)
+    pendente = max(0.0, total - recebido)
 
-    if pendente > 0 and status == "Pago":
+    if recebido >= total and total > 0:
+        status = "Pago"
+    elif recebido > 0:
         status = "Parcial"
+    else:
+        status = "Pendente"
 
     conn = get_conn()
     cur = conn.execute("""
@@ -504,37 +588,78 @@ def registrar_venda(pedido, cliente, produto, qtd, preco_kg, desconto, data_vend
 
     registrar_movimento(produto, "Saída", qtd, preco_kg, "venda", venda_id, pedido)
 
+    # VENDA -> CAIXA pelo valor efetivamente recebido.
     if recebido > 0:
-        registrar_financeiro(data_venda, f"Recebimento venda {pedido}", "Entrada", recebido,
-                             forma, "venda", venda_id)
+        registrar_financeiro(
+            data_venda, f"Venda {pedido} - recebimento", "Entrada",
+            recebido, forma, "venda", venda_id
+        )
 
+    # VENDA -> CONTAS A RECEBER somente pelo saldo pendente.
     if pendente > 0:
-        garantir_conta_receber(cliente, f"Venda {pedido}", pendente,
-                               vencimento or data_venda, "venda", venda_id)
+        garantir_conta_receber(
+            cliente, f"Venda {pedido}", pendente,
+            vencimento or data_venda, "venda", venda_id
+        )
+
 
 
 def obter_extrato_realizado():
     return df_query("""
-        SELECT data_mov AS data, descricao, tipo, valor, forma_pagamento
+        SELECT data_mov AS data, descricao, tipo, valor, forma_pagamento,
+               origem_tipo, origem_id
         FROM financeiro
         ORDER BY date(data_mov) DESC, id DESC
     """)
 
 
+
 def obter_previsto():
     entradas = df_query("""
-        SELECT vencimento AS data, 'A receber: ' || cliente || ' - ' || descricao AS descricao,
-               'Entrada prevista' AS tipo, valor, '' AS forma_pagamento
+        SELECT vencimento AS data,
+               'A receber: ' || COALESCE(cliente,'') || ' - ' || descricao AS descricao,
+               'Entrada prevista' AS tipo,
+               MAX(valor - COALESCE(valor_recebido,0), 0) AS valor,
+               '' AS forma_pagamento,
+               'conta_receber' AS origem
         FROM contas_receber
         WHERE status IN ('Pendente','Parcial')
+          AND (valor - COALESCE(valor_recebido,0)) > 0
     """)
     saidas = df_query("""
-        SELECT vencimento AS data, 'A pagar: ' || fornecedor || ' - ' || descricao AS descricao,
-               'Saída prevista' AS tipo, valor, '' AS forma_pagamento
+        SELECT vencimento AS data,
+               'A pagar: ' || COALESCE(fornecedor,'') || ' - ' || descricao AS descricao,
+               'Saída prevista' AS tipo,
+               MAX(valor - COALESCE(valor_pago,0), 0) AS valor,
+               '' AS forma_pagamento,
+               'conta_pagar' AS origem
         FROM contas_pagar
         WHERE status IN ('Pendente','Parcial')
+          AND (valor - COALESCE(valor_pago,0)) > 0
     """)
     return pd.concat([entradas, saidas], ignore_index=True)
+
+
+def resumo_financeiro_por_origem():
+    compras = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE origem_tipo='compra' AND tipo='Saída'")
+    vendas = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE origem_tipo='venda' AND tipo='Entrada'")
+    despesas = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE origem_tipo='despesa' AND tipo='Saída'")
+    pagar = scalar("""
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_pago,0),0)),0)
+        FROM contas_pagar WHERE status IN ('Pendente','Parcial')
+    """)
+    receber = scalar("""
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_recebido,0),0)),0)
+        FROM contas_receber WHERE status IN ('Pendente','Parcial')
+    """)
+    return {
+        "Compras pagas": float(compras or 0),
+        "Vendas recebidas": float(vendas or 0),
+        "Despesas pagas": float(despesas or 0),
+        "Contas a pagar": float(pagar or 0),
+        "Contas a receber": float(receber or 0),
+    }
+
 
 
 def renderizar_tabela_simples(tabela, titulo, colunas_ocultar=None):
@@ -546,6 +671,179 @@ def renderizar_tabela_simples(tabela, titulo, colunas_ocultar=None):
         st.info("Nenhum registro encontrado.")
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+
+
+def _parse_date_text(value):
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except Exception:
+        return date.today()
+
+
+def _status_por_saldo(total, pago):
+    total = float(total or 0)
+    pago = min(max(float(pago or 0), 0), total)
+    return "Pago" if total > 0 and pago >= total else ("Parcial" if pago > 0 else "Pendente")
+
+
+def sincronizar_origem_financeira(origem_tipo, origem_id):
+    """Recalcula caixa/contas vinculadas depois de editar uma compra, venda ou despesa."""
+    conn = get_conn()
+    conn.execute("DELETE FROM financeiro WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
+
+    if origem_tipo == "compra":
+        row = conn.execute("SELECT * FROM compras WHERE id=?", (origem_id,)).fetchone()
+        if row:
+            total = float(row["valor_total"] or 0)
+            conta = conn.execute("SELECT id, valor_pago FROM contas_pagar WHERE origem_tipo='compra' AND origem_id=? ORDER BY id DESC LIMIT 1", (origem_id,)).fetchone()
+            pago = float(conta["valor_pago"] or 0) if conta else 0.0
+            if row["status_pagamento"] == "Pago":
+                pago = total
+            pago = min(max(pago, 0), total)
+            if pago > 0:
+                conn.execute("""INSERT INTO financeiro
+                    (data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (row["data_compra"], f"Compra #{origem_id}: {row['produto']}", "Saída", pago,
+                     row["forma_pagamento"], "compra", origem_id))
+            saldo = total - pago
+            if saldo > 0:
+                if conta:
+                    conn.execute("""UPDATE contas_pagar SET fornecedor=?, descricao=?, valor=?, vencimento=?,
+                        valor_pago=?, status=?, origem_tipo='compra', origem_id=? WHERE id=?""",
+                        (row["fornecedor"], f"Compra #{origem_id}: {row['produto']}", total,
+                         row["vencimento"] or row["data_compra"], pago, _status_por_saldo(total,pago), origem_id, conta["id"]))
+                else:
+                    conn.execute("""INSERT INTO contas_pagar
+                        (fornecedor,descricao,valor,valor_pago,vencimento,status,origem_tipo,origem_id)
+                        VALUES (?,?,?,?,?,?,?,?)""",
+                        (row["fornecedor"], f"Compra #{origem_id}: {row['produto']}", total, pago,
+                         row["vencimento"] or row["data_compra"], _status_por_saldo(total,pago), "compra", origem_id))
+            elif conta:
+                conn.execute("UPDATE contas_pagar SET fornecedor=?, descricao=?, valor=?, vencimento=?, valor_pago=?, status=? WHERE id=?",
+                             (row["fornecedor"], f"Compra #{origem_id}: {row['produto']}", total,
+                              row["vencimento"] or row["data_compra"], pago, "Pago", conta["id"]))
+
+    elif origem_tipo == "venda":
+        row = conn.execute("SELECT * FROM vendas WHERE id=?", (origem_id,)).fetchone()
+        if row:
+            total = float(row["valor_total"] or 0)
+            recebido = min(max(float(row["valor_recebido"] or 0),0), total)
+            if recebido > 0:
+                conn.execute("""INSERT INTO financeiro
+                    (data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (row["data_venda"], f"Venda {row['pedido']} - recebimento", "Entrada", recebido,
+                     row["forma_pagamento"], "venda", origem_id))
+            conta = conn.execute("SELECT id, valor_recebido FROM contas_receber WHERE origem_tipo='venda' AND origem_id=? ORDER BY id DESC LIMIT 1", (origem_id,)).fetchone()
+            recebido_conta = max(recebido, float(conta["valor_recebido"] or 0) if conta else 0.0)
+            recebido_conta = min(recebido_conta, total)
+            saldo = total - recebido_conta
+            if saldo > 0:
+                if conta:
+                    conn.execute("""UPDATE contas_receber SET cliente=?, descricao=?, valor=?, vencimento=?,
+                        valor_recebido=?, status=? WHERE id=?""",
+                        (row["cliente"], f"Venda {row['pedido']}", total, row["vencimento"] or row["data_venda"],
+                         recebido_conta, _status_por_saldo(total,recebido_conta), conta["id"]))
+                else:
+                    conn.execute("""INSERT INTO contas_receber
+                        (cliente,descricao,valor,valor_recebido,vencimento,status,origem_tipo,origem_id)
+                        VALUES (?,?,?,?,?,?,?,?)""",
+                        (row["cliente"], f"Venda {row['pedido']}", total, recebido_conta,
+                         row["vencimento"] or row["data_venda"], _status_por_saldo(total,recebido_conta), "venda", origem_id))
+            elif conta:
+                conn.execute("UPDATE contas_receber SET cliente=?, descricao=?, valor=?, vencimento=?, valor_recebido=?, status='Pago' WHERE id=?",
+                             (row["cliente"], f"Venda {row['pedido']}", total, row["vencimento"] or row["data_venda"], recebido_conta, conta["id"]))
+
+    elif origem_tipo == "despesa":
+        row = conn.execute("SELECT * FROM despesas WHERE id=?", (origem_id,)).fetchone()
+        if row:
+            total = float(row["valor"] or 0)
+            conta = conn.execute("SELECT id, valor_pago FROM contas_pagar WHERE origem_tipo='despesa' AND origem_id=? ORDER BY id DESC LIMIT 1", (origem_id,)).fetchone()
+            pago = float(conta["valor_pago"] or 0) if conta else (total if row["status"] == "Pago" else 0)
+            pago = min(max(pago,0),total)
+            if pago > 0:
+                conn.execute("""INSERT INTO financeiro
+                    (data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
+                    VALUES (?,?,?,?,?,?,?)""",
+                    (row["data_desp"], f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", "Saída", pago,
+                     row["pagamento"], "despesa", origem_id))
+            saldo = total-pago
+            if saldo > 0:
+                if conta:
+                    conn.execute("""UPDATE contas_pagar SET fornecedor='', descricao=?, valor=?, vencimento=?, valor_pago=?, status=? WHERE id=?""",
+                                 (f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", total,
+                                  row["vencimento"] or row["data_desp"], pago, _status_por_saldo(total,pago), conta["id"]))
+                else:
+                    conn.execute("""INSERT INTO contas_pagar
+                        (fornecedor,descricao,valor,valor_pago,vencimento,status,origem_tipo,origem_id)
+                        VALUES ('',?,?,?,?,?,?,?)""",
+                        (f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", total, pago,
+                         row["vencimento"] or row["data_desp"], _status_por_saldo(total,pago), "despesa", origem_id))
+            elif conta:
+                conn.execute("UPDATE contas_pagar SET descricao=?, valor=?, vencimento=?, valor_pago=?, status='Pago' WHERE id=?",
+                             (f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", total,
+                              row["vencimento"] or row["data_desp"], pago, conta["id"]))
+    conn.commit()
+    conn.close()
+
+
+def excluir_origem_integrada(origem_tipo, origem_id, tabela):
+    conn = get_conn()
+    conn.execute("DELETE FROM financeiro WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
+    conn.execute("DELETE FROM contas_pagar WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
+    conn.execute("DELETE FROM contas_receber WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
+    conn.execute("DELETE FROM movimentos_estoque WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
+    conn.execute(f"DELETE FROM {tabela} WHERE id=?", (origem_id,))
+    conn.commit()
+    conn.close()
+
+
+def editar_registro_simples(tabela, titulo, label_id, campos, order_by="id DESC"):
+    df = df_query(f"SELECT * FROM {tabela} ORDER BY {order_by}")
+    if df.empty:
+        return
+    st.markdown("---")
+    st.subheader(f"✏️ Editar ou excluir — {titulo}")
+    opcoes = {f"#{int(r['id'])} - {r.get(label_id, '')}": int(r["id"]) for _, r in df.iterrows()}
+    escolha = st.selectbox("Selecione o registro", list(opcoes), key=f"edit_sel_{tabela}")
+    rid = opcoes[escolha]
+    row = df[df["id"] == rid].iloc[0]
+    valores = {}
+    with st.form(f"edit_form_{tabela}"):
+        cols = st.columns(2)
+        for i, (col, rotulo, tipo, opcoes_campo) in enumerate(campos):
+            atual = row[col]
+            box = cols[i % 2]
+            if tipo == "float":
+                valores[col] = box.number_input(rotulo, min_value=0.0, value=float(atual or 0), step=0.01)
+            elif tipo == "date":
+                valores[col] = box.date_input(rotulo, value=_parse_date_text(atual))
+            elif tipo == "select":
+                lista = opcoes_campo or []
+                atual_s = str(atual or "")
+                idx = lista.index(atual_s) if atual_s in lista else 0
+                valores[col] = box.selectbox(rotulo, lista, index=idx)
+            else:
+                valores[col] = box.text_input(rotulo, value="" if pd.isna(atual) else str(atual))
+        c1, c2 = st.columns(2)
+        salvar = c1.form_submit_button("💾 Salvar alteração")
+        excluir = c2.form_submit_button("🗑️ Excluir registro")
+    if salvar:
+        sets=[]; params=[]
+        for col, _, tipo, _ in campos:
+            v=valores[col]
+            if tipo == "date": v=v.strftime("%Y-%m-%d")
+            sets.append(f"{col}=?"); params.append(v)
+        params.append(rid)
+        conn=get_conn(); conn.execute(f"UPDATE {tabela} SET {', '.join(sets)} WHERE id=?", params); conn.commit(); conn.close()
+        st.success("Alteração salva com sucesso.")
+        st.rerun()
+    if excluir:
+        conn=get_conn(); conn.execute(f"DELETE FROM {tabela} WHERE id=?", (rid,)); conn.commit(); conn.close()
+        st.success("Registro excluído.")
+        st.rerun()
 
 
 def pagina_clientes():
@@ -576,6 +874,7 @@ def pagina_clientes():
                     st.success("Cliente cadastrado.")
                     st.rerun()
     renderizar_tabela_simples("clientes", "Clientes cadastrados")
+    editar_registro_simples("clientes", "Clientes", "nome", [("nome","Nome *","text",None),("telefone","Telefone","text",None),("cidade","Cidade","text",None),("endereco","Endereço","text",None)])
 
 
 def pagina_fornecedores():
@@ -605,6 +904,7 @@ def pagina_fornecedores():
                 st.success("Fornecedor cadastrado.")
                 st.rerun()
     renderizar_tabela_simples("fornecedores", "Fornecedores cadastrados")
+    editar_registro_simples("fornecedores", "Fornecedores", "fornecedor", [("fornecedor","Fornecedor *","text",None),("contato","Contato","text",None),("telefone","Telefone","text",None),("endereco","Endereço","text",None),("produto_fornecido","Produtos fornecidos","text",None),("prazo_pagamento","Prazo de pagamento","text",None),("observacoes","Observações","text",None)])
 
 
 def pagina_produtos():
@@ -643,6 +943,7 @@ def pagina_produtos():
             lambda r: "⚠️ BAIXO" if r["estoque_atual"] <= r["estoque_minimo"] else "OK", axis=1
         )
     st.dataframe(df, use_container_width=True, hide_index=True)
+    editar_registro_simples("produtos", "Produtos", "nome", [("nome","Produto *","text",None),("categoria","Categoria","select",CATEGORIAS_PRODUTO),("unidade","Unidade","select",["kg","un","g","pacote","caixa"]),("preco_venda","Preço de venda","float",None),("estoque_minimo","Estoque mínimo","float",None)])
 
 
 def pagina_compras():
@@ -688,6 +989,39 @@ def pagina_compras():
                 st.rerun()
 
     renderizar_tabela_simples("compras", "Histórico de compras")
+    compras_edit = df_query("SELECT * FROM compras ORDER BY id DESC")
+    if not compras_edit.empty:
+        st.markdown("---")
+        st.subheader("✏️ Editar compra")
+        op = {f"#{int(r['id'])} - {r['produto']} - {moeda(r['valor_total'])}": int(r['id']) for _,r in compras_edit.iterrows()}
+        escolha = st.selectbox("Compra", list(op), key="edit_compra_id")
+        rid=op[escolha]; r=compras_edit[compras_edit.id==rid].iloc[0]
+        fornecedores_edit = df_query("SELECT fornecedor FROM fornecedores ORDER BY fornecedor")["fornecedor"].tolist()
+        produtos_edit = get_produtos()["nome"].tolist()
+        with st.form("edit_compra_form"):
+            c1,c2,c3=st.columns(3)
+            f=c1.selectbox("Fornecedor", [""]+fornecedores_edit, index=([""]+fornecedores_edit).index(str(r["fornecedor"] or "")) if str(r["fornecedor"] or "") in [""]+fornecedores_edit else 0)
+            pdt=c2.selectbox("Produto", produtos_edit, index=produtos_edit.index(str(r["produto"])) if str(r["produto"]) in produtos_edit else 0)
+            q=c3.number_input("Quantidade", min_value=0.0, value=float(r["qtd"] or 0), step=0.1)
+            c4,c5,c6=st.columns(3)
+            pr=c4.number_input("Preço", min_value=0.0, value=float(r["preco_kg"] or 0), step=0.01)
+            dc=c5.date_input("Data", value=_parse_date_text(r["data_compra"]))
+            va=c6.date_input("Validade", value=_parse_date_text(r["validade"]))
+            c7,c8,c9=st.columns(3)
+            lote=c7.text_input("Lote", value=str(r["lote"] or ""))
+            forma=c8.selectbox("Forma de pagamento", FORMAS_PAGAMENTO, index=FORMAS_PAGAMENTO.index(r["forma_pagamento"]) if r["forma_pagamento"] in FORMAS_PAGAMENTO else 0)
+            venc=c9.date_input("Vencimento", value=_parse_date_text(r["vencimento"]))
+            obs=st.text_area("Observações", value=str(r["observacoes"] or ""))
+            salvar=st.form_submit_button("💾 Salvar alteração")
+            excluir=st.form_submit_button("🗑️ Excluir compra")
+        if salvar:
+            total=q*pr
+            conn=get_conn(); conn.execute("UPDATE compras SET fornecedor=?,produto=?,qtd=?,preco_kg=?,valor_total=?,data_compra=?,lote=?,validade=?,forma_pagamento=?,vencimento=?,observacoes=? WHERE id=?", (f,pdt,q,pr,total,dc.strftime("%Y-%m-%d"),lote,va.strftime("%Y-%m-%d"),forma,venc.strftime("%Y-%m-%d"),obs,rid)); conn.commit(); conn.close()
+            sincronizar_origem_financeira("compra",rid)
+            st.success("Compra alterada. Estoque e Financeiro recalculados."); st.rerun()
+        if excluir:
+            excluir_origem_integrada("compra",rid,"compras")
+            st.success("Compra excluída e vínculos recalculados."); st.rerun()
 
 
 def pagina_vendas():
@@ -748,6 +1082,41 @@ def pagina_vendas():
                 st.rerun()
 
     renderizar_tabela_simples("vendas", "Histórico de vendas")
+    vendas_edit=df_query("SELECT * FROM vendas ORDER BY id DESC")
+    if not vendas_edit.empty:
+        st.markdown("---")
+        st.subheader("✏️ Editar venda")
+        op={f"#{int(r['id'])} - {r['pedido']} - {r['produto']} - {moeda(r['valor_total'])}":int(r['id']) for _,r in vendas_edit.iterrows()}
+        escolha=st.selectbox("Venda",list(op),key="edit_venda_id"); rid=op[escolha]; r=vendas_edit[vendas_edit.id==rid].iloc[0]
+        clientes_edit=df_query("SELECT nome FROM clientes ORDER BY nome")["nome"].tolist(); produtos_edit=get_produtos()["nome"].tolist()
+        with st.form("edit_venda_form"):
+            c1,c2,c3=st.columns(3)
+            pedido=c1.text_input("Número do pedido",value=str(r["pedido"] or ""))
+            cliente=c2.selectbox("Cliente",[""]+clientes_edit,index=([""]+clientes_edit).index(str(r["cliente"] or "")) if str(r["cliente"] or "") in [""]+clientes_edit else 0)
+            produto=c3.selectbox("Produto",produtos_edit,index=produtos_edit.index(str(r["produto"])) if str(r["produto"]) in produtos_edit else 0)
+            c4,c5,c6=st.columns(3)
+            qtd=c4.number_input("Quantidade",min_value=0.0,value=float(r["qtd_kg"] or 0),step=0.1)
+            preco=c5.number_input("Preço",min_value=0.0,value=float(r["preco_kg"] or 0),step=0.01)
+            desconto=c6.number_input("Desconto",min_value=0.0,value=float(r["desconto"] or 0),step=0.01)
+            c7,c8,c9=st.columns(3)
+            dv=c7.date_input("Data",value=_parse_date_text(r["data_venda"]))
+            forma=c8.selectbox("Forma de pagamento",FORMAS_PAGAMENTO,index=FORMAS_PAGAMENTO.index(r["forma_pagamento"]) if r["forma_pagamento"] in FORMAS_PAGAMENTO else 0)
+            recebido=c9.number_input("Valor recebido",min_value=0.0,value=float(r["valor_recebido"] or 0),step=0.01)
+            venc=st.date_input("Vencimento",value=_parse_date_text(r["vencimento"]))
+            obs=st.text_area("Observações",value=str(r["observacoes"] or ""))
+            salvar=st.form_submit_button("💾 Salvar alteração")
+            excluir=st.form_submit_button("🗑️ Excluir venda")
+        if salvar:
+            total=max(0.0,qtd*preco-desconto); recebido2=min(recebido,total); status=_status_por_saldo(total,recebido2)
+            if estoque_produto(produto)+float(r["qtd_kg"] or 0)<qtd:
+                st.error("Estoque insuficiente para a nova quantidade.")
+            else:
+                conn=get_conn(); conn.execute("UPDATE vendas SET pedido=?,cliente=?,produto=?,qtd_kg=?,preco_kg=?,desconto=?,valor_total=?,data_venda=?,forma_pagamento=?,status_pagamento=?,valor_recebido=?,vencimento=?,observacoes=? WHERE id=?",(pedido,cliente,produto,qtd,preco,desconto,total,dv.strftime("%Y-%m-%d"),forma,status,recebido2,venc.strftime("%Y-%m-%d"),obs,rid)); conn.commit(); conn.close()
+                sincronizar_origem_financeira("venda",rid)
+                st.success("Venda alterada. Estoque e Financeiro recalculados."); st.rerun()
+        if excluir:
+            excluir_origem_integrada("venda",rid,"vendas")
+            st.success("Venda excluída e vínculos recalculados."); st.rerun()
 
 
 def pagina_estoque():
@@ -758,20 +1127,11 @@ def pagina_estoque():
         st.info("Cadastre produtos primeiro.")
         return
 
-    registros = []
-    for _, r in produtos.iterrows():
-        est = estoque_produto(r["nome"])
-        registros.append({
-            "Produto": r["nome"],
-            "Categoria": r["categoria"],
-            "Unidade": r["unidade"],
-            "Estoque atual": est,
-            "Estoque mínimo": float(r["estoque_minimo"] or 0),
-            "Situação": "⚠️ BAIXO" if est <= float(r["estoque_minimo"] or 0) else "OK",
-        })
-
-    df = pd.DataFrame(registros)
+    st.subheader("🔗 Estoque integrado: Compras − Vendas + Ajustes")
+    df = resumo_estoque()
     st.dataframe(df, use_container_width=True, hide_index=True)
+
+    st.caption("O estoque atual é calculado diretamente pelas compras registradas menos as vendas registradas, considerando também perdas e ajustes manuais.")
 
     st.markdown("---")
     st.subheader("Registrar perda ou ajuste")
@@ -786,15 +1146,15 @@ def pagina_estoque():
                 st.error("Informe uma quantidade.")
             else:
                 registrar_movimento(produto, tipo, qtd, 0, "manual", None, obs)
-                st.success("Movimentação registrada.")
+                st.success("Movimentação registrada e estoque atualizado.")
                 st.rerun()
 
     st.subheader("Histórico de movimentações")
     renderizar_tabela_simples("movimentos_estoque", "Movimentações")
 
-
 def pagina_financeiro():
-    st.title("💰 Financeiro")
+    st.title("💰 Financeiro Integrado")
+
     realizado = obter_extrato_realizado()
     previsto = obter_previsto()
 
@@ -802,25 +1162,44 @@ def pagina_financeiro():
     saidas = float(realizado.loc[realizado["tipo"] == "Saída", "valor"].sum()) if not realizado.empty else 0
     saldo = entradas - saidas
 
-    receber = float(scalar(
-        "SELECT COALESCE(SUM(valor),0) FROM contas_receber WHERE status IN ('Pendente','Parcial')"
-    ) or 0)
-    pagar = float(scalar(
-        "SELECT COALESCE(SUM(valor),0) FROM contas_pagar WHERE status IN ('Pendente','Parcial')"
-    ) or 0)
+    receber = float(scalar("""
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_recebido,0),0)),0)
+        FROM contas_receber WHERE status IN ('Pendente','Parcial')
+    """) or 0)
+    pagar = float(scalar("""
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_pago,0),0)),0)
+        FROM contas_pagar WHERE status IN ('Pendente','Parcial')
+    """) or 0)
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Entradas realizadas", moeda(entradas))
     c2.metric("Saídas realizadas", moeda(saidas))
     c3.metric("Caixa realizado", moeda(saldo))
-    c4.metric("A receber / A pagar", f"{moeda(receber)} / {moeda(pagar)}")
+    c4.metric("Saldo futuro líquido", moeda(receber - pagar))
 
-    tab1, tab2 = st.tabs(["Caixa realizado", "Compromissos futuros"])
+    st.markdown("### 🔗 Integração automática")
+    resumo = resumo_financeiro_por_origem()
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("🛒 Compras pagas", moeda(resumo["Compras pagas"]))
+    c2.metric("🧾 Vendas recebidas", moeda(resumo["Vendas recebidas"]))
+    c3.metric("💳 Despesas pagas", moeda(resumo["Despesas pagas"]))
+    c4.metric("💸 A pagar", moeda(resumo["Contas a pagar"]))
+    c5.metric("💵 A receber", moeda(resumo["Contas a receber"]))
+
+    st.caption(
+        "Compras, vendas e despesas entram automaticamente no caixa quando efetivamente pagas/recebidas. "
+        "O que ficar pendente ou parcial aparece em Contas a Pagar/Receber."
+    )
+
+    tab1, tab2, tab3 = st.tabs(["Caixa realizado", "Compromissos futuros", "Origem das movimentações"])
+
     with tab1:
         if realizado.empty:
             st.info("Nenhuma movimentação realizada.")
         else:
-            st.dataframe(realizado, use_container_width=True, hide_index=True)
+            exib = realizado.copy()
+            exib["origem"] = exib.get("origem_tipo", "")
+            st.dataframe(exib, use_container_width=True, hide_index=True)
 
     with tab2:
         if previsto.empty:
@@ -828,8 +1207,52 @@ def pagina_financeiro():
         else:
             st.dataframe(previsto.sort_values("data"), use_container_width=True, hide_index=True)
 
+    with tab3:
+        st.subheader("Compras")
+        compras = df_query("""
+            SELECT id, data_compra AS data, fornecedor, produto, valor_total,
+                   forma_pagamento, status_pagamento, vencimento
+            FROM compras ORDER BY id DESC
+        """)
+        st.dataframe(compras, use_container_width=True, hide_index=True)
+
+        st.subheader("Vendas")
+        vendas = df_query("""
+            SELECT id, pedido, data_venda AS data, cliente, produto, valor_total,
+                   valor_recebido, (valor_total - COALESCE(valor_recebido,0)) AS saldo,
+                   forma_pagamento, status_pagamento, vencimento
+            FROM vendas ORDER BY id DESC
+        """)
+        st.dataframe(vendas, use_container_width=True, hide_index=True)
+
+        st.subheader("Despesas")
+        despesas = df_query("""
+            SELECT id, data_desp AS data, categoria, descricao, valor,
+                   pagamento, status, vencimento
+            FROM despesas ORDER BY id DESC
+        """)
+        st.dataframe(despesas, use_container_width=True, hide_index=True)
+
+        st.subheader("Contas a pagar")
+        cp = df_query("""
+            SELECT id, fornecedor, descricao, valor, COALESCE(valor_pago,0) AS pago,
+                   MAX(valor-COALESCE(valor_pago,0),0) AS saldo, vencimento, status,
+                   origem_tipo, origem_id
+            FROM contas_pagar ORDER BY date(vencimento), id DESC
+        """)
+        st.dataframe(cp, use_container_width=True, hide_index=True)
+
+        st.subheader("Contas a receber")
+        cr = df_query("""
+            SELECT id, cliente, descricao, valor, COALESCE(valor_recebido,0) AS recebido,
+                   MAX(valor-COALESCE(valor_recebido,0),0) AS saldo, vencimento, status,
+                   origem_tipo, origem_id
+            FROM contas_receber ORDER BY date(vencimento), id DESC
+        """)
+        st.dataframe(cr, use_container_width=True, hide_index=True)
+
     st.markdown("---")
-    st.subheader("Movimentação financeira manual")
+    st.subheader("➕ Movimentação financeira manual")
     with st.form("financeiro_manual"):
         c1, c2, c3 = st.columns(3)
         data_mov = c1.date_input("Data", value=date.today())
@@ -843,94 +1266,155 @@ def pagina_financeiro():
                 st.error("Informe descrição e valor.")
             else:
                 registrar_financeiro(
-                    data_mov.strftime("%Y-%m-%d"), descricao, tipo, valor, forma, "manual", None
+                    data_mov.strftime("%Y-%m-%d"), descricao, tipo, valor,
+                    forma, "manual", None
                 )
                 st.success("Lançamento realizado.")
                 st.rerun()
 
 
+
 def pagina_contas_pagar():
     st.title("💸 Contas a Pagar")
-    df = df_query("SELECT * FROM contas_pagar ORDER BY date(vencimento), id DESC")
+    df = df_query("""
+        SELECT *, MAX(valor-COALESCE(valor_pago,0),0) AS saldo
+        FROM contas_pagar
+        ORDER BY date(vencimento), id DESC
+    """)
     if df.empty:
         st.info("Nenhuma conta a pagar.")
-    else:
-        df["vencida"] = df.apply(
-            lambda r: "🔴 SIM" if r["status"] in ("Pendente", "Parcial")
-            and r["vencimento"] and r["vencimento"] < hoje() else "", axis=1
-        )
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        return
 
-        pendentes = df[df["status"].isin(["Pendente", "Parcial"])]
-        if not pendentes.empty:
-            st.subheader("Registrar pagamento")
-            opcoes = {
-                f"#{int(r['id'])} - {r['fornecedor']} - {r['descricao']} - {moeda(r['valor'])}": int(r["id"])
-                for _, r in pendentes.iterrows()
-            }
-            escolha = st.selectbox("Conta", list(opcoes))
-            valor_pago = st.number_input("Valor pago", min_value=0.0, step=0.01)
-            forma = st.selectbox("Forma", FORMAS_PAGAMENTO)
-            if st.button("Confirmar pagamento"):
-                conta_id = opcoes[escolha]
-                row = df[df["id"] == conta_id].iloc[0]
-                valor = min(valor_pago, float(row["valor"]))
-                if valor <= 0:
-                    st.error("Informe um valor.")
-                else:
-                    novo_status = "Pago" if valor >= float(row["valor"]) else "Parcial"
-                    conn = get_conn()
-                    conn.execute("UPDATE contas_pagar SET status=? WHERE id=?", (novo_status, conta_id))
-                    conn.commit()
-                    conn.close()
-                    registrar_financeiro(
-                        hoje(), f"Pagamento: {row['fornecedor']} - {row['descricao']}",
-                        "Saída", valor, forma, "conta_pagar", conta_id
-                    )
-                    st.success("Pagamento registrado no caixa realizado.")
-                    st.rerun()
+    df["vencida"] = df.apply(
+        lambda r: "🔴 SIM" if r["status"] in ("Pendente", "Parcial")
+        and r["vencimento"] and r["vencimento"] < hoje() else "", axis=1
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    pendentes = df[(df["status"].isin(["Pendente", "Parcial"])) & (df["saldo"] > 0)]
+    if not pendentes.empty:
+        st.subheader("Registrar pagamento")
+        opcoes = {
+            f"#{int(r['id'])} - {r['fornecedor']} - {r['descricao']} - Saldo {moeda(r['saldo'])}":
+            int(r["id"]) for _, r in pendentes.iterrows()
+        }
+        escolha = st.selectbox("Conta", list(opcoes))
+        valor_pago = st.number_input("Valor pago", min_value=0.0, step=0.01)
+        forma = st.selectbox("Forma", FORMAS_PAGAMENTO, key="forma_pagar")
+
+        if st.button("Confirmar pagamento", key="btn_pagar"):
+            conta_id = opcoes[escolha]
+            row = df[df["id"] == conta_id].iloc[0]
+            saldo_atual = float(row["saldo"])
+            valor = min(float(valor_pago), saldo_atual)
+
+            if valor <= 0:
+                st.error("Informe um valor maior que zero.")
+            else:
+                novo_pago = float(row["valor_pago"] or 0) + valor
+                novo_status = "Pago" if novo_pago >= float(row["valor"]) else "Parcial"
+
+                conn = get_conn()
+                conn.execute(
+                    "UPDATE contas_pagar SET valor_pago=?, status=? WHERE id=?",
+                    (novo_pago, novo_status, conta_id)
+                )
+                conn.commit()
+                conn.close()
+
+                registrar_financeiro(
+                    hoje(), f"Pagamento conta a pagar #{conta_id} - {row['descricao']}",
+                    "Saída", valor, forma, "conta_pagar", conta_id
+                )
+                st.success(f"Pagamento de {moeda(valor)} registrado no caixa.")
+                st.rerun()
+
+    _editar_contas_financeiras("contas_pagar", "Contas a Pagar", "fornecedor", "valor_pago", "conta_pagar")
 
 
 def pagina_contas_receber():
     st.title("💵 Contas a Receber")
-    df = df_query("SELECT * FROM contas_receber ORDER BY date(vencimento), id DESC")
+    df = df_query("""
+        SELECT *, MAX(valor-COALESCE(valor_recebido,0),0) AS saldo
+        FROM contas_receber
+        ORDER BY date(vencimento), id DESC
+    """)
     if df.empty:
         st.info("Nenhuma conta a receber.")
-    else:
-        df["vencida"] = df.apply(
-            lambda r: "🔴 SIM" if r["status"] in ("Pendente", "Parcial")
-            and r["vencimento"] and r["vencimento"] < hoje() else "", axis=1
-        )
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        return
 
-        pendentes = df[df["status"].isin(["Pendente", "Parcial"])]
-        if not pendentes.empty:
-            st.subheader("Registrar recebimento")
-            opcoes = {
-                f"#{int(r['id'])} - {r['cliente']} - {r['descricao']} - {moeda(r['valor'])}": int(r["id"])
-                for _, r in pendentes.iterrows()
-            }
-            escolha = st.selectbox("Conta", list(opcoes))
-            valor_recebido = st.number_input("Valor recebido", min_value=0.0, step=0.01)
-            forma = st.selectbox("Forma", FORMAS_PAGAMENTO)
-            if st.button("Confirmar recebimento"):
-                conta_id = opcoes[escolha]
-                row = df[df["id"] == conta_id].iloc[0]
-                valor = min(valor_recebido, float(row["valor"]))
-                if valor <= 0:
-                    st.error("Informe um valor.")
-                else:
-                    novo_status = "Pago" if valor >= float(row["valor"]) else "Parcial"
-                    conn = get_conn()
-                    conn.execute("UPDATE contas_receber SET status=? WHERE id=?", (novo_status, conta_id))
-                    conn.commit()
-                    conn.close()
-                    registrar_financeiro(
-                        hoje(), f"Recebimento: {row['cliente']} - {row['descricao']}",
-                        "Entrada", valor, forma, "conta_receber", conta_id
-                    )
-                    st.success("Recebimento registrado no caixa realizado.")
-                    st.rerun()
+    df["vencida"] = df.apply(
+        lambda r: "🔴 SIM" if r["status"] in ("Pendente", "Parcial")
+        and r["vencimento"] and r["vencimento"] < hoje() else "", axis=1
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    pendentes = df[(df["status"].isin(["Pendente", "Parcial"])) & (df["saldo"] > 0)]
+    if not pendentes.empty:
+        st.subheader("Registrar recebimento")
+        opcoes = {
+            f"#{int(r['id'])} - {r['cliente']} - {r['descricao']} - Saldo {moeda(r['saldo'])}":
+            int(r["id"]) for _, r in pendentes.iterrows()
+        }
+        escolha = st.selectbox("Conta", list(opcoes))
+        valor_recebido = st.number_input("Valor recebido", min_value=0.0, step=0.01)
+        forma = st.selectbox("Forma", FORMAS_PAGAMENTO, key="forma_receber")
+
+        if st.button("Confirmar recebimento", key="btn_receber"):
+            conta_id = opcoes[escolha]
+            row = df[df["id"] == conta_id].iloc[0]
+            saldo_atual = float(row["saldo"])
+            valor = min(float(valor_recebido), saldo_atual)
+
+            if valor <= 0:
+                st.error("Informe um valor maior que zero.")
+            else:
+                novo_recebido = float(row["valor_recebido"] or 0) + valor
+                novo_status = "Pago" if novo_recebido >= float(row["valor"]) else "Parcial"
+
+                conn = get_conn()
+                conn.execute(
+                    "UPDATE contas_receber SET valor_recebido=?, status=? WHERE id=?",
+                    (novo_recebido, novo_status, conta_id)
+                )
+                conn.commit()
+                conn.close()
+
+                registrar_financeiro(
+                    hoje(), f"Recebimento conta a receber #{conta_id} - {row['descricao']}",
+                    "Entrada", valor, forma, "conta_receber", conta_id
+                )
+                st.success(f"Recebimento de {moeda(valor)} registrado no caixa.")
+                st.rerun()
+
+
+
+
+    _editar_contas_financeiras("contas_receber", "Contas a Receber", "cliente", "valor_recebido", "conta_receber")
+
+def _editar_contas_financeiras(tabela, titulo, pessoa_col, valor_pago_col, origem_label):
+    df=df_query(f"SELECT *, MAX(valor-COALESCE({valor_pago_col},0),0) AS saldo FROM {tabela} ORDER BY id DESC")
+    if df.empty:
+        return
+    st.markdown("---")
+    st.subheader(f"✏️ Editar ou excluir — {titulo}")
+    op={f"#{int(r['id'])} - {r[pessoa_col]} - {r['descricao']} - {moeda(r['valor'])}":int(r['id']) for _,r in df.iterrows()}
+    escolha=st.selectbox("Registro",list(op),key=f"edit_{tabela}_id"); rid=op[escolha]; r=df[df.id==rid].iloc[0]
+    with st.form(f"edit_{tabela}_form"):
+        pessoa=st.text_input("Pessoa/Fornecedor",value=str(r[pessoa_col] or ""))
+        desc=st.text_input("Descrição",value=str(r["descricao"] or ""))
+        valor=st.number_input("Valor total",min_value=0.0,value=float(r["valor"] or 0),step=0.01)
+        pago=st.number_input("Valor já pago/recebido",min_value=0.0,value=float(r[valor_pago_col] or 0),step=0.01)
+        venc=st.date_input("Vencimento",value=_parse_date_text(r["vencimento"]))
+        salvar=st.form_submit_button("💾 Salvar alteração")
+        excluir=st.form_submit_button("🗑️ Excluir conta")
+    if salvar:
+        pago=min(max(pago,0),valor); status=_status_por_saldo(valor,pago)
+        conn=get_conn(); conn.execute(f"UPDATE {tabela} SET {pessoa_col}=?,descricao=?,valor=?,{valor_pago_col}=?,vencimento=?,status=? WHERE id=?",(pessoa,desc,valor,pago,venc.strftime("%Y-%m-%d"),status,rid)); conn.commit(); conn.close()
+        st.success("Conta alterada. O saldo futuro foi recalculado."); st.rerun()
+    if excluir:
+        conn=get_conn(); conn.execute(f"DELETE FROM {tabela} WHERE id=?",(rid,)); conn.commit(); conn.close(); st.success("Conta excluída."); st.rerun()
+
 
 
 def pagina_despesas():
@@ -943,6 +1427,10 @@ def pagina_despesas():
         descricao = st.text_input("Descrição")
         forma = st.selectbox("Pagamento", FORMAS_PAGAMENTO)
         status = st.selectbox("Status", STATUS_PAGAMENTO)
+        valor_pago = st.number_input(
+            "Valor já pago (use em pagamento parcial)",
+            min_value=0.0, max_value=max(float(valor), 0.0), step=0.01
+        )
         venc = st.date_input("Vencimento", value=date.today())
         salvar = st.form_submit_button("Registrar despesa")
 
@@ -950,27 +1438,50 @@ def pagina_despesas():
             if valor <= 0:
                 st.error("Informe o valor.")
             else:
+                if status == "Pago":
+                    valor_pago_final = float(valor)
+                elif status == "Parcial":
+                    valor_pago_final = min(float(valor_pago), float(valor))
+                else:
+                    valor_pago_final = 0.0
+
+                status_final = (
+                    "Pago" if valor_pago_final >= float(valor)
+                    else ("Parcial" if valor_pago_final > 0 else "Pendente")
+                )
+
                 conn = get_conn()
                 cur = conn.execute("""
                     INSERT INTO despesas
                     (data_desp,categoria,descricao,valor,pagamento,status,vencimento)
                     VALUES (?,?,?,?,?,?,?)
                 """, (data_desp.strftime("%Y-%m-%d"), categoria, descricao, valor,
-                      forma, status, venc.strftime("%Y-%m-%d")))
+                      forma, status_final, venc.strftime("%Y-%m-%d")))
                 desp_id = cur.lastrowid
                 conn.commit()
                 conn.close()
 
-                if status == "Pago":
+                # DESPESA -> CAIXA pelo valor já pago.
+                if valor_pago_final > 0:
                     registrar_financeiro(
                         data_desp.strftime("%Y-%m-%d"),
-                        f"Despesa: {categoria} - {descricao}",
-                        "Saída", valor, forma, "despesa", desp_id
+                        f"Despesa #{desp_id}: {categoria} - {descricao}",
+                        "Saída", valor_pago_final, forma, "despesa", desp_id
                     )
-                st.success("Despesa registrada.")
+
+                # DESPESA -> CONTAS A PAGAR pelo saldo.
+                saldo = float(valor) - valor_pago_final
+                if saldo > 0:
+                    garantir_conta_pagar(
+                        "", f"Despesa #{desp_id}: {categoria} - {descricao}",
+                        saldo, venc.strftime("%Y-%m-%d"), "despesa", desp_id
+                    )
+
+                st.success("Despesa integrada ao Financeiro.")
                 st.rerun()
 
     renderizar_tabela_simples("despesas", "Despesas")
+
 
 
 def pagina_entregas():
@@ -1015,6 +1526,7 @@ def pagina_entregas():
             st.rerun()
 
     renderizar_tabela_simples("entregas", "Entregas cadastradas")
+    editar_registro_simples("entregas", "Entregas", "pedido", [("pedido","Pedido","text",None),("cliente","Cliente","text",None),("data_ent","Data","date",None),("endereco","Endereço","text",None),("bairro","Bairro","text",None),("cidade","Cidade","text",None),("entregador","Entregador","text",None),("taxa_entrega","Taxa de entrega","float",None),("status","Status","select",STATUS_ENTREGA),("observacoes","Observações","text",None)])
 
 
 def pagina_relatorios():
@@ -1206,12 +1718,14 @@ def painel():
     saidas = float(realizado.loc[realizado["tipo"] == "Saída", "valor"].sum()) if not realizado.empty else 0
     caixa = entradas - saidas
 
-    receber = float(scalar(
-        "SELECT COALESCE(SUM(valor),0) FROM contas_receber WHERE status IN ('Pendente','Parcial')"
-    ) or 0)
-    pagar = float(scalar(
-        "SELECT COALESCE(SUM(valor),0) FROM contas_pagar WHERE status IN ('Pendente','Parcial')"
-    ) or 0)
+    receber = float(scalar("""
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_recebido,0),0)),0)
+        FROM contas_receber WHERE status IN ('Pendente','Parcial')
+    """) or 0)
+    pagar = float(scalar("""
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_pago,0),0)),0)
+        FROM contas_pagar WHERE status IN ('Pendente','Parcial')
+    """) or 0)
 
     estoque_baixo = 0
     if not produtos.empty:
@@ -1220,17 +1734,22 @@ def painel():
             for _, r in produtos.iterrows()
         )
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("💰 Caixa realizado", moeda(caixa))
-    c2.metric("🧾 Vendas", moeda(float(vendas["valor_total"].sum()) if not vendas.empty else 0))
-    c3.metric("💵 A receber", moeda(receber))
-    c4.metric("💸 A pagar", moeda(pagar))
+    # Resumo financeiro principal: mostra claramente entradas, saídas e saldo atual.
+    st.subheader("💰 Resumo financeiro")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("🟢 Entradas", moeda(entradas))
+    c2.metric("🔴 Saídas", moeda(saidas))
+    c3.metric("💰 Saldo atual", moeda(caixa))
+    c4.metric("🧾 Vendas", moeda(float(vendas["valor_total"].sum()) if not vendas.empty else 0))
+    c5.metric("💵 A receber", moeda(receber))
 
-    c5, c6, c7, c8 = st.columns(4)
-    c5.metric("📦 Produtos", len(produtos))
-    c6.metric("⚠️ Estoque baixo", estoque_baixo)
-    c7.metric("🛒 Quantidade de vendas", len(vendas))
-    c8.metric("📅 Data", hoje())
+    c6, c7, c8, c9 = st.columns(4)
+    c6.metric("💸 A pagar", moeda(pagar))
+    c7.metric("📦 Produtos", len(produtos))
+    c8.metric("⚠️ Estoque baixo", estoque_baixo)
+    c9.metric("🛒 Quantidade de vendas", len(vendas))
+
+    st.caption(f"Saldo atual = Entradas realizadas ({moeda(entradas)}) − Saídas realizadas ({moeda(saidas)}) = {moeda(caixa)}")
 
     st.markdown("---")
 
@@ -1239,17 +1758,14 @@ def painel():
     with col1:
         st.subheader("⚠️ Estoque baixo")
         baixos = []
-        for _, r in produtos.iterrows():
-            est = estoque_produto(r["nome"])
-            minimo = float(r["estoque_minimo"] or 0)
-            if est <= minimo:
-                baixos.append({
-                    "Produto": r["nome"],
-                    "Estoque": est,
-                    "Mínimo": minimo
-                })
-        if baixos:
-            st.dataframe(pd.DataFrame(baixos), use_container_width=True, hide_index=True)
+        resumo = resumo_estoque()
+        if not resumo.empty:
+            baixos = resumo[resumo["Estoque atual"] <= resumo["Mínimo"]].copy()
+        if not baixos.empty:
+            st.dataframe(
+                baixos[["Produto", "Estoque atual", "Mínimo", "Compras", "Vendas", "Situação"]],
+                use_container_width=True, hide_index=True
+            )
         else:
             st.success("Nenhum produto abaixo do estoque mínimo.")
 
@@ -1277,6 +1793,17 @@ def painel():
                 use_container_width=True,
                 hide_index=True
             )
+
+    st.markdown("---")
+    st.subheader("📦 Estoque atualizado")
+    estoque_painel = resumo_estoque()
+    if estoque_painel.empty:
+        st.info("Nenhum produto cadastrado.")
+    else:
+        st.dataframe(
+            estoque_painel[["Produto", "Categoria", "Compras", "Vendas", "Ajustes +", "Ajustes -", "Estoque atual", "Mínimo", "Situação"]],
+            use_container_width=True, hide_index=True
+        )
 
 
 # Inicialização
@@ -1354,3 +1881,4 @@ elif opcao == "Importar Planilha":
     pagina_importar()
 elif opcao == "Backup":
     pagina_backup()
+
