@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Kero Fish ERP - versão 10.3 - Correção Definitiva de Inserção
+Kero Fish ERP - versão 10.1 - Edição direta no grid com melhorias avançadas
 """
 
 import os
@@ -26,6 +26,7 @@ FORMAS_PAGAMENTO = [
 ]
 
 STATUS_PAGAMENTO = ["Pago", "Pendente", "Parcial"]
+STATUS_CONTA = ["Pendente", "Pago", "Parcial", "Cancelado"]
 STATUS_ENTREGA = ["Aguardando", "Em separação", "Saiu para entrega", "Entregue", "Cancelado"]
 
 CATEGORIAS_PRODUTO = [
@@ -114,7 +115,7 @@ def init_db():
     c.execute("""
         CREATE TABLE IF NOT EXISTS produtos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome TEXT NOT NULL,
+            nome TEXT NOT NULL UNIQUE,
             categoria TEXT DEFAULT 'Outros',
             unidade TEXT DEFAULT 'kg',
             preco_venda REAL DEFAULT 0,
@@ -145,7 +146,7 @@ def init_db():
     c.execute("""
         CREATE TABLE IF NOT EXISTS vendas (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pedido TEXT,
+            pedido TEXT UNIQUE,
             cliente TEXT DEFAULT '',
             produto TEXT NOT NULL,
             qtd_kg REAL DEFAULT 0,
@@ -245,7 +246,7 @@ def init_db():
         )
     """)
 
-    # Migrações seguras
+    # Migrações e colunas novas
     add_column_if_missing(conn, "clientes", "endereco", "TEXT DEFAULT ''")
     add_column_if_missing(conn, "produtos", "unidade", "TEXT DEFAULT 'kg'")
     add_column_if_missing(conn, "produtos", "preco_venda", "REAL DEFAULT 0")
@@ -255,13 +256,14 @@ def init_db():
     add_column_if_missing(conn, "contas_pagar", "valor_pago", "REAL DEFAULT 0")
     add_column_if_missing(conn, "contas_receber", "valor_recebido", "REAL DEFAULT 0")
 
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_produtos_nome ON produtos(nome)")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_vendas_pedido ON vendas(pedido) WHERE pedido IS NOT NULL")
+
     for nome, categoria in PRODUTOS_INICIAIS:
-        existe = conn.execute("SELECT id FROM produtos WHERE nome = ?", (nome,)).fetchone()
-        if not existe:
-            conn.execute(
-                "INSERT INTO produtos (nome, categoria, unidade) VALUES (?, ?, 'kg')",
-                (nome, categoria),
-            )
+        conn.execute(
+            "INSERT OR IGNORE INTO produtos (nome, categoria, unidade) VALUES (?, ?, 'kg')",
+            (nome, categoria),
+        )
 
     conn.commit()
     conn.close()
@@ -396,11 +398,17 @@ def renderizar_tabela_simples(tabela, titulo, colunas_ocultar=None):
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
 
+def _parse_date_text(value):
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d").date()
+    except Exception:
+        return date.today()
+
 def main():
     init_db()
 
     st.sidebar.title("🐟 Kero Fish ERP")
-    st.sidebar.caption("Versão 10.3 — Estável")
+    st.sidebar.caption("Versão 10.1 — Melhorias e Otimizações")
 
     menu = st.sidebar.selectbox(
         "Navegação",
@@ -465,7 +473,7 @@ def main():
                         st.success("Produto cadastrado com sucesso!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erro ao cadastrar produto: {e}")
+                        st.error(f"Erro (produto já cadastrado?): {e}")
                 else:
                     st.warning("Informe o nome do produto.")
 
