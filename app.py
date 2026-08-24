@@ -438,6 +438,226 @@ def init_db():
 # backup_db definido no início do arquivo para garantir o banco correto.
 
 
+
+
+# -----------------------------------------------------------------------------
+# IMPORTAÇÃO DA PLANILHA BASE DO KERO FISH
+# -----------------------------------------------------------------------------
+# A planilha da Versão 9 é a fonte dos dados operacionais que devem aparecer
+# nos respectivos módulos do ERP. A importação é idempotente: pode ser feita
+# mais de uma vez sem duplicar produtos, clientes, compras ou vendas.
+PLANILHA_BASE = APP_DIR / "Kero_Fish_Versao_9_Nosso_Projeto.xlsx"
+
+
+def _texto(v, padrao=""):
+    if pd.isna(v):
+        return padrao
+    return str(v).strip()
+
+
+def _numero(v, padrao=0.0):
+    if pd.isna(v):
+        return float(padrao)
+    try:
+        return float(str(v).replace("R$", "").replace(".", "").replace(",", ".").strip())
+    except Exception:
+        try:
+            return float(v)
+        except Exception:
+            return float(padrao)
+
+
+def _data_iso(v, padrao=None):
+    if pd.isna(v) or _texto(v) == "":
+        return padrao or hoje()
+    if isinstance(v, (datetime, date)):
+        return v.strftime("%Y-%m-%d")
+    try:
+        return pd.to_datetime(v, dayfirst=True).strftime("%Y-%m-%d")
+    except Exception:
+        return padrao or hoje()
+
+
+def importar_planilha_base(caminho=None):
+    """Importa os dados da planilha Versão 9 para as tabelas do ERP.
+
+    Fonte: Produtos, Clientes, Compras, Vendas e Financeiro.
+    Campos sem equivalente no ERP ficam em observações; nada é apagado.
+    """
+    caminho = Path(caminho or PLANILHA_BASE)
+    if not caminho.exists():
+        return {"erro": f"Planilha não encontrada: {caminho}", "importados": {}}
+
+    xls = pd.ExcelFile(caminho)
+    conn = get_conn()
+    cont = {"produtos": 0, "clientes": 0, "fornecedores": 0, "compras": 0, "vendas": 0, "financeiro": 0}
+    try:
+        # 1) PRODUTOS ---------------------------------------------------------
+        if "Produtos" in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name="Produtos")
+            for _, r in df.dropna(how="all").iterrows():
+                nome = _texto(r.get("Produto"))
+                if not nome or nome.lower() == "produto":
+                    continue
+                categoria = _texto(r.get("Categoria"), "Outros")
+                unidade = _texto(r.get("Unidade"), "kg")
+                minimo = _numero(r.get("Estoque Mínimo"))
+                custo = _numero(r.get("Custo Atual"))
+                preco = _numero(r.get("Preço Venda"))
+                existe = conn.execute("SELECT id FROM produtos WHERE lower(nome)=lower(?)", (nome,)).fetchone()
+                if existe:
+                    conn.execute("""UPDATE produtos SET categoria=?,unidade=?,custo_medio=?,preco_venda=?,estoque_minimo=? WHERE id=?""",
+                                 (categoria, unidade, custo, preco, minimo, existe[0]))
+                else:
+                    conn.execute("""INSERT INTO produtos(nome,categoria,unidade,custo_medio,preco_venda,estoque_minimo,ativo)
+                                    VALUES(?,?,?,?,?,?,1)""", (nome,categoria,unidade,custo,preco,minimo))
+                cont["produtos"] += 1
+
+        # 2) CLIENTES ---------------------------------------------------------
+        if "Clientes" in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name="Clientes")
+            for _, r in df.dropna(how="all").iterrows():
+                nome = _texto(r.get("Nome"))
+                if not nome or nome.lower() == "nome":
+                    continue
+                tel = _texto(r.get("Telefone"))
+                endereco = _texto(r.get("Endereço"))
+                cidade = _texto(r.get("Cidade"))
+                obs = _texto(r.get("Observações"))
+                existe = conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)", (nome,)).fetchone()
+                if existe:
+                    conn.execute("UPDATE clientes SET telefone=?,endereco=?,cidade=? WHERE id=?", (tel,endereco,cidade,existe[0]))
+                else:
+                    conn.execute("INSERT INTO clientes(nome,telefone,endereco,cidade,data_cad) VALUES(?,?,?,?,?)",
+                                 (nome,tel,endereco,cidade,hoje()))
+                cont["clientes"] += 1
+
+        # 3) FORNECEDORES -----------------------------------------------------
+        fornecedores_encontrados = set()
+        if "Fornecedores" in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name="Fornecedores", header=2)
+            for _, r in df.dropna(how="all").iterrows():
+                nome = _texto(r.get("Fornecedor"))
+                if not nome or nome.lower() == "fornecedor":
+                    continue
+                fornecedores_encontrados.add(nome)
+                tel = _texto(r.get("Telefone")); cidade = _texto(r.get("Cidade"))
+                produto_f = _texto(r.get("Produto principal")); obs = _texto(r.get("Observação"))
+                existe = conn.execute("SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)", (nome,)).fetchone()
+                if existe:
+                    conn.execute("UPDATE fornecedores SET telefone=?,produto_fornecido=?,observacoes=? WHERE id=?",
+                                 (tel,produto_f,obs,existe[0]))
+                else:
+                    conn.execute("""INSERT INTO fornecedores(fornecedor,telefone,endereco,produto_fornecido,observacoes)
+                                    VALUES(?,?,?,?,?)""", (nome,tel,cidade,produto_f,obs))
+                cont["fornecedores"] += 1
+
+        # A planilha de fornecedores da Versão 9 está sem linhas preenchidas,
+        # mas compras/produtos identificam Fornecedor 1 e Fornecedor 2.
+        # Criamos somente esses nomes que já constam nos próprios dados.
+        for origem_sheet, col in (("Compras", "Fornecedor"), ("Produtos", "Fornecedor")):
+            if origem_sheet not in xls.sheet_names:
+                continue
+            df = pd.read_excel(xls, sheet_name=origem_sheet)
+            for v in df[col].dropna().tolist() if col in df.columns else []:
+                nome = _texto(v)
+                if nome and nome.lower() not in ("fornecedor", "nan"):
+                    fornecedores_encontrados.add(nome)
+        for nome in sorted(fornecedores_encontrados):
+            existe = conn.execute("SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)", (nome,)).fetchone()
+            if not existe:
+                conn.execute("INSERT INTO fornecedores(fornecedor,observacoes) VALUES(?,?)",
+                             (nome, "Importado da planilha base; cadastro complementar pode ser preenchido."))
+                cont["fornecedores"] += 1
+
+        # 4) COMPRAS ----------------------------------------------------------
+        if "Compras" in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name="Compras")
+            for _, r in df.dropna(how="all").iterrows():
+                produto = _texto(r.get("Produto")); fornecedor = _texto(r.get("Fornecedor"))
+                qtd = _numero(r.get("Quantidade")); preco = _numero(r.get("Custo Unitário"))
+                if not produto or qtd <= 0:
+                    continue
+                data_compra = _data_iso(r.get("Data")); lote = _texto(r.get("Lote")); validade = _data_iso(r.get("Validade"), "")
+                freezer = _texto(r.get("Freezer"))
+                total = _numero(r.get("Total")) or qtd * preco
+                existe = conn.execute("""SELECT id FROM compras WHERE data_compra=? AND fornecedor=? AND produto=? AND qtd=? AND abs(preco_kg-?)<0.00001""",
+                                     (data_compra,fornecedor,produto,qtd,preco)).fetchone()
+                if existe:
+                    continue
+                cur = conn.execute("""INSERT INTO compras(fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,
+                                      forma_pagamento,status_pagamento,vencimento,observacoes)
+                                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                   (fornecedor,produto,qtd,preco,total,data_compra,lote,validade,"A prazo","Pendente",data_compra,
+                                    f"Freezer: {freezer}" if freezer else ""))
+                compra_id = cur.lastrowid
+                conn.execute("""INSERT INTO movimentos_estoque(data_mov,produto,tipo,quantidade,custo_unitario,origem_tipo,origem_id,observacoes)
+                                VALUES(?,?,?,?,?,?,?,?)""",
+                             (data_compra,produto,"Entrada",qtd,preco,"compra",compra_id,f"Importado da planilha; lote {lote}"))
+                cont["compras"] += 1
+
+        # 5) VENDAS -----------------------------------------------------------
+        vendas_importadas = []
+        if "Vendas" in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name="Vendas")
+            for _, r in df.dropna(how="all").iterrows():
+                source_id = int(_numero(r.get("ID"))) if _numero(r.get("ID")) else None
+                cliente = _texto(r.get("Cliente")); produto = _texto(r.get("Produto"))
+                qtd = _numero(r.get("Quantidade")); preco = _numero(r.get("Preço Unitário")); desconto = 0.0
+                if not produto or qtd <= 0:
+                    continue
+                data_venda = _data_iso(r.get("Data")); bruto=qtd*preco; total=_numero(r.get("Total")) or bruto
+                pagamento = _texto(r.get("Pagamento"), "Não informado")
+                status_pedido = _texto(r.get("Status"), "")
+                entrega = _texto(r.get("Entrega"), "")
+                pedido = f"KF-IMPORT-{source_id:06d}" if source_id else proximo_pedido()
+                # A planilha Financeiro registra essas duas vendas como entradas PIX;
+                # portanto o recebimento é tratado como realizado.
+                recebido = total if pagamento.upper() in ("PIX","DINHEIRO","CARTÃO","CARTAO","TRANSFERÊNCIA","TRANSFERENCIA") else 0.0
+                status_pag = "Pago" if recebido >= total and total > 0 else ("Parcial" if recebido > 0 else "Pendente")
+                obs = f"Status do pedido: {status_pedido}; Entrega: {entrega}".strip("; ")
+                existe = conn.execute("SELECT id FROM vendas WHERE pedido=?", (pedido,)).fetchone()
+                if existe:
+                    venda_id=existe[0]
+                    conn.execute("""UPDATE vendas SET cliente=?,produto=?,qtd_kg=?,preco_kg=?,valor_total=?,data_venda=?,forma_pagamento=?,
+                                      status_pagamento=?,valor_recebido=?,vencimento=?,observacoes=? WHERE id=?""",
+                                 (cliente,produto,qtd,preco,total,data_venda,pagamento,status_pag,recebido,data_venda,obs,venda_id))
+                else:
+                    cur=conn.execute("""INSERT INTO vendas(pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,
+                                      forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes)
+                                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                     (pedido,cliente,produto,qtd,preco,desconto,total,data_venda,pagamento,status_pag,recebido,data_venda,obs))
+                    venda_id=cur.lastrowid
+                    conn.execute("""INSERT INTO movimentos_estoque(data_mov,produto,tipo,quantidade,custo_unitario,origem_tipo,origem_id,observacoes)
+                                    VALUES(?,?,?,?,?,?,?,?)""",
+                                 (data_venda,produto,"Saída",qtd,0,"venda",venda_id,"Importado da planilha"))
+                vendas_importadas.append((venda_id,total,recebido,data_venda,pagamento,pedido))
+                cont["vendas"] += 1
+
+        # 6) FINANCEIRO -------------------------------------------------------
+        # Não copiamos linhas vazias da coluna Valor. Para as vendas, usamos o
+        # valor calculado a partir da própria venda e mantemos o vínculo com ela.
+        for venda_id,total,recebido,data_venda,pagamento,pedido in vendas_importadas:
+            if recebido <= 0:
+                continue
+            existe = conn.execute("SELECT id FROM financeiro WHERE origem_tipo='venda' AND origem_id=?", (venda_id,)).fetchone()
+            if existe:
+                conn.execute("UPDATE financeiro SET data_mov=?,descricao=?,tipo=?,valor=?,forma_pagamento=? WHERE id=?",
+                             (data_venda,f"Venda {pedido} - recebimento","Entrada",recebido,pagamento,existe[0]))
+            else:
+                conn.execute("""INSERT INTO financeiro(data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
+                                VALUES(?,?,?,?,?,?,?)""",
+                             (data_venda,f"Venda {pedido} - recebimento","Entrada",recebido,pagamento,"venda",venda_id))
+                cont["financeiro"] += 1
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+    return {"erro": None, "importados": cont}
+
 def df_query(sql, params=()):
     conn = get_conn()
     try:
