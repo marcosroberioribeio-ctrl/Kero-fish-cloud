@@ -1848,237 +1848,49 @@ def pagina_normas():
 
 
 def pagina_importar():
-    st.title("📥 Importar Planilha")
-    st.info("A importação abaixo procura um arquivo Excel cujo nome comece por 'KERO FISH' na pasta do sistema.")
+    st.title("📥 Importar dados da planilha Kero Fish")
+    st.info("A planilha Kero_Fish_Versao_9_Nosso_Projeto.xlsx é a fonte dos registros históricos. A importação coloca cada registro no respectivo módulo do ERP.")
 
-    arquivo = None
-    for f in os.listdir("."):
-        if f.lower().startswith("kero fish") and f.lower().endswith(".xlsx"):
-            arquivo = f
-            break
+    arquivo = Path(PLANILHA_BASE)
+    if not arquivo.exists():
+        # procura também no diretório atual por segurança
+        candidatos = list(Path('.').glob('Kero_Fish_Versao_9_Nosso_Projeto.xlsx')) + list(Path('.').glob('Kero_Fish*.xlsx'))
+        if candidatos:
+            arquivo = candidatos[0]
 
-    if arquivo:
-        st.success(f"Arquivo encontrado: {arquivo}")
-        if st.button("Importar clientes e fornecedores"):
+    if arquivo.exists():
+        st.success(f"Planilha encontrada: {arquivo.name}")
+        st.markdown("**Serão importados:** Produtos, Clientes, Fornecedores, Compras, Vendas e Financeiro. Compras entram no estoque e vendas saem do estoque.")
+        if st.button("🚀 IMPORTAR TODOS OS DADOS DA PLANILHA", type="primary", key="importar_todos_base"):
             try:
-                xls = pd.ExcelFile(arquivo)
-                conn = get_conn()
-                importadas = []
-
-                for sheet in xls.sheet_names:
-                    df = pd.read_excel(xls, sheet_name=sheet)
-                    if df.empty:
-                        continue
-
-                    sl = sheet.lower()
-
-                    if "fornecedor" in sl:
-                        for _, row in df.iterrows():
-                            vals = list(row.values)
-                            nome = str(vals[0]).strip() if len(vals) > 0 and pd.notna(vals[0]) else ""
-                            if not nome:
-                                continue
-                            tel = str(vals[1]).strip() if len(vals) > 1 and pd.notna(vals[1]) else ""
-                            contato = str(vals[2]).strip() if len(vals) > 2 and pd.notna(vals[2]) else ""
-
-                            existe = conn.execute(
-                                "SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)",
-                                (nome,)
-                            ).fetchone()
-
-                            if not existe:
-                                conn.execute(
-                                    "INSERT INTO fornecedores (fornecedor,telefone,contato) VALUES (?,?,?)",
-                                    (nome, tel, contato)
-                                )
-                        importadas.append(sheet)
-
-                    elif "cliente" in sl:
-                        for _, row in df.iterrows():
-                            vals = list(row.values)
-                            nome = str(vals[0]).strip() if len(vals) > 0 and pd.notna(vals[0]) else ""
-                            if not nome:
-                                continue
-                            tel = str(vals[1]).strip() if len(vals) > 1 and pd.notna(vals[1]) else ""
-                            cidade = str(vals[2]).strip() if len(vals) > 2 and pd.notna(vals[2]) else ""
-
-                            existe = conn.execute(
-                                "SELECT id FROM clientes WHERE lower(nome)=lower(?)",
-                                (nome,)
-                            ).fetchone()
-
-                            if not existe:
-                                conn.execute(
-                                    "INSERT INTO clientes (nome,telefone,cidade,data_cad) VALUES (?,?,?,?)",
-                                    (nome, tel, cidade, hoje())
-                                )
-                        importadas.append(sheet)
-
-                conn.commit()
-                conn.close()
-                st.success("Importação concluída sem duplicar registros existentes.")
-            except Exception as e:
-                st.error(f"Erro na importação: {e}")
-    else:
-        st.warning("Nenhum arquivo 'KERO FISH*.xlsx' foi encontrado.")
-
-
-def pagina_backup():
-    st.title("💾 Backup e Segurança")
-    st.write("Faça backups frequentes do banco de dados antes de atualizações importantes.")
-    st.info(f"Banco ativo: {DB_FILE}")
-
-    st.subheader("🔐 Restaurar um banco existente")
-    arquivo_db = st.file_uploader("Selecione um backup .db do Kero Fish", type=["db"], key="restaurar_db_upload")
-    if arquivo_db is not None and st.button("♻️ RESTAURAR ESTE BANCO", key="btn_restaurar_db", type="primary"):
-        # Backup do banco atual antes de substituir.
-        backup_atual = backup_db("antes_restauracao")
-        tmp = Path(BACKUP_DIR) / "_restore_temp.db"
-        try:
-            tmp.write_bytes(arquivo_db.getbuffer())
-            if _db_record_count(tmp) <= 0:
-                st.error("O arquivo selecionado não contém registros Kero Fish válidos.")
-            else:
-                # Valida integridade antes de substituir.
-                con=sqlite3.connect(tmp)
-                ok=con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-                con.close()
-                if not ok:
-                    st.error("O banco selecionado está corrompido.")
+                resultado = importar_planilha_base(str(arquivo))
+                if resultado.get("erro"):
+                    st.error(resultado["erro"])
                 else:
-                    shutil.copy2(tmp, DB_FILE)
-                    st.success("Banco restaurado. O backup anterior foi preservado.")
+                    c = resultado.get("importados", {})
+                    st.success(
+                        f"Importação concluída: {c.get('produtos',0)} produtos, "
+                        f"{c.get('clientes',0)} clientes, {c.get('fornecedores',0)} fornecedores, "
+                        f"{c.get('compras',0)} compras, {c.get('vendas',0)} vendas e "
+                        f"{c.get('financeiro',0)} lançamentos financeiros."
+                    )
+                    st.info("O estoque agora é calculado automaticamente por Compras − Vendas + Ajustes.")
                     st.rerun()
-        except Exception as exc:
-            st.error(f"Não foi possível restaurar o banco: {exc}")
-        finally:
-            try: tmp.unlink()
-            except Exception: pass
-
-
-    if st.button("Criar backup agora"):
-        destino = backup_db()
-        if destino:
-            with open(destino, "rb") as f:
-                st.download_button(
-                    "⬇️ Baixar backup",
-                    data=f.read(),
-                    file_name=os.path.basename(destino),
-                    mime="application/octet-stream"
-                )
-        else:
-            st.error("Banco de dados ainda não encontrado.")
-
-    st.markdown("---")
-    st.subheader("Backups existentes")
-    if os.path.exists(BACKUP_DIR):
-        arquivos = sorted(
-            [f for f in os.listdir(BACKUP_DIR) if f.endswith(".db")],
-            reverse=True
-        )
-        if arquivos:
-            st.dataframe(pd.DataFrame({"Backup": arquivos}), use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum backup criado ainda.")
-
-
-def painel():
-    st.title("🐟 Kero Fish — Painel Geral")
-
-    realizado = obter_extrato_realizado()
-    vendas = df_query("SELECT * FROM vendas")
-    produtos = get_produtos()
-
-    entradas = float(realizado.loc[realizado["tipo"] == "Entrada", "valor"].sum()) if not realizado.empty else 0
-    saidas = float(realizado.loc[realizado["tipo"] == "Saída", "valor"].sum()) if not realizado.empty else 0
-    caixa = entradas - saidas
-
-    receber = float(scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_recebido,0) > 0 THEN valor - COALESCE(valor_recebido,0) ELSE 0 END),0)
-        FROM contas_receber WHERE status IN ('Pendente','Parcial')
-    """) or 0)
-    pagar = float(scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_pago,0) > 0 THEN valor - COALESCE(valor_pago,0) ELSE 0 END),0)
-        FROM contas_pagar WHERE status IN ('Pendente','Parcial')
-    """) or 0)
-
-    estoque_baixo = 0
-    if not produtos.empty:
-        estoque_baixo = sum(
-            estoque_produto(r["nome"]) <= float(r["estoque_minimo"] or 0)
-            for _, r in produtos.iterrows()
-        )
-
-    # Resumo financeiro principal: mostra claramente entradas, saídas e saldo atual.
-    st.subheader("💰 Resumo financeiro")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🟢 Entradas", moeda(entradas))
-    c2.metric("🔴 Saídas", moeda(saidas))
-    c3.metric("💰 Saldo atual", moeda(caixa))
-    c4.metric("🧾 Vendas", moeda(float(vendas["valor_total"].sum()) if not vendas.empty else 0))
-    c5.metric("💵 A receber", moeda(receber))
-
-    c6, c7, c8, c9 = st.columns(4)
-    c6.metric("💸 A pagar", moeda(pagar))
-    c7.metric("📦 Produtos", len(produtos))
-    c8.metric("⚠️ Estoque baixo", estoque_baixo)
-    c9.metric("🛒 Quantidade de vendas", len(vendas))
-
-    st.caption(f"Saldo atual = Entradas realizadas ({moeda(entradas)}) − Saídas realizadas ({moeda(saidas)}) = {moeda(caixa)}")
-
-    st.markdown("---")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("⚠️ Estoque baixo")
-        baixos = []
-        resumo = resumo_estoque()
-        if not resumo.empty:
-            baixos = resumo[resumo["Estoque atual"] <= resumo["Mínimo"]].copy()
-        if not baixos.empty:
-            st.dataframe(
-                baixos[["Produto", "Estoque atual", "Mínimo", "Compras", "Vendas", "Situação"]],
-                use_container_width=True, hide_index=True
-            )
-        else:
-            st.success("Nenhum produto abaixo do estoque mínimo.")
-
-    with col2:
-        st.subheader("🔴 Contas vencidas")
-        venc_pagar = df_query("""
-            SELECT fornecedor AS pessoa, descricao, valor, vencimento
-            FROM contas_pagar
-            WHERE status IN ('Pendente','Parcial') AND vencimento < ?
-        """, (hoje(),))
-        venc_receber = df_query("""
-            SELECT cliente AS pessoa, descricao, valor, vencimento
-            FROM contas_receber
-            WHERE status IN ('Pendente','Parcial') AND vencimento < ?
-        """, (hoje(),))
-        if venc_pagar.empty and venc_receber.empty:
-            st.success("Nenhuma conta vencida.")
-        else:
-            if not venc_pagar.empty:
-                venc_pagar["tipo"] = "A pagar"
-            if not venc_receber.empty:
-                venc_receber["tipo"] = "A receber"
-            st.dataframe(
-                pd.concat([venc_pagar, venc_receber], ignore_index=True),
-                use_container_width=True,
-                hide_index=True
-            )
-
-    st.markdown("---")
-    st.subheader("📦 Estoque atualizado")
-    estoque_painel = resumo_estoque()
-    if estoque_painel.empty:
-        st.info("Nenhum produto cadastrado.")
+            except Exception as e:
+                st.error(f"Erro ao importar a planilha: {e}")
     else:
-        st.dataframe(
-            estoque_painel[["Produto", "Categoria", "Compras", "Vendas", "Ajustes +", "Ajustes -", "Estoque atual", "Mínimo", "Situação"]],
-            use_container_width=True, hide_index=True
-        )
+        st.error("A planilha Kero_Fish_Versao_9_Nosso_Projeto.xlsx não foi encontrada na pasta do programa.")
+        st.warning("Coloque a planilha junto do arquivo Python e abra novamente o aplicativo.")
+
+    st.markdown("---")
+    st.subheader("📊 Registros atuais no banco")
+    conn = get_conn()
+    try:
+        for tabela, rotulo in [("produtos","Produtos"),("clientes","Clientes"),("fornecedores","Fornecedores"),("compras","Compras"),("vendas","Vendas"),("financeiro","Financeiro")]:
+            qtd = conn.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0]
+            st.write(f"**{rotulo}:** {qtd}")
+    finally:
+        conn.close()
 
 
 # Inicialização segura: primeiro localiza/reutiliza o banco correto e cria
@@ -2094,6 +1906,19 @@ if os.path.exists(DB_FILE):
     except Exception:
         pass
 init_db()
+
+# IMPORTAÇÃO AUTOMÁTICA DA PLANILHA BASE
+# A planilha Versão 9 é a fonte oficial dos dados históricos do nosso projeto.
+# A rotina é idempotente: pode ser executada novamente sem duplicar compras/vendas.
+# Assim, se a implantação estiver com banco vazio ou incompleto, os registros
+# históricos são incorporados ao ERP automaticamente.
+try:
+    if PLANILHA_BASE.exists():
+        importar_planilha_base(str(PLANILHA_BASE))
+except Exception as _e_import:
+    # Não interrompe o ERP caso a planilha ainda não esteja disponível ou
+    # exista alguma incompatibilidade; a importação manual continua disponível.
+    pass
 
 # Logo
 st.sidebar.title("Kero Fish")
