@@ -30,16 +30,16 @@ def init_db():
     c.execute('CREATE TABLE IF NOT EXISTS compras (id INTEGER PRIMARY KEY AUTOINCREMENT, produto TEXT, qtd REAL, valor_total REAL, data_compra TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS despesas (id INTEGER PRIMARY KEY AUTOINCREMENT, data_desp TEXT, categoria TEXT, descricao TEXT, valor REAL, pagamento TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS fornecedores (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor TEXT, contato TEXT, telefone TEXT, endereco TEXT, produto_fornecido TEXT, prazo_pagamento TEXT, observacoes TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS contas_pagar (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor TEXT, descricao TEXT, valor REAL, vencimento TEXT, status TEXT, data_pagamento TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS contas_receber (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente TEXT, descricao TEXT, valor REAL, vencimento TEXT, status TEXT, data_recebimento TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS entregas (id INTEGER PRIMARY KEY AUTOINCREMENT, data_ent TEXT, pedido TEXT, bairro TEXT, entregador TEXT, taxa_entrega REAL, custo_combustivel REAL, lucro_entrega REAL)')
+    c.execute('CREATE TABLE IF NOT EXISTS contas_pagar (id INTEGER PRIMARY KEY AUTOINCREMENT, fornecedor TEXT, descricao TEXT, valor REAL, vencimento TEXT, status TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS contas_receber (id INTEGER PRIMARY KEY AUTOINCREMENT, cliente TEXT, descricao TEXT, valor REAL, vencimento TEXT, status TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS entregas (id INTEGER PRIMARY KEY AUTOINCREMENT, data_ent TEXT, pedido TEXT, bairro TEXT, entregador TEXT, taxa_entrega REAL)')
     conn.commit()
     conn.close()
 
 init_db()
 
 logo_encontrada = None
-for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "jpg.jpg"]:
+for ext in ["png", "jpg", "jpeg", "PNG", "JPG"]:
     if os.path.exists(f"logo.{ext}"):
         logo_encontrada = f"logo.{ext}"
         break
@@ -47,7 +47,13 @@ for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "jpg.jpg"]:
 if logo_encontrada:
     st.sidebar.image(logo_encontrada, use_container_width=True)
 else:
-    st.sidebar.warning("Atencao: Envie o arquivo da logo para a raiz com o nome 'logo.png'.")
+    st.sidebar.warning("Atenção: Envie o arquivo da logo para a raiz ou carregue abaixo.")
+    uploaded_logo = st.sidebar.file_uploader("Enviar arquivo da logo", type=["png", "jpg", "jpeg"])
+    if uploaded_logo is not None:
+        with open("logo.png", "wb") as f:
+            f.write(uploaded_logo.getbuffer())
+        st.success("Logo salva com sucesso! Atualizando...")
+        st.rerun()
 
 opcao = st.sidebar.radio(
     "Navegação", 
@@ -57,6 +63,30 @@ opcao = st.sidebar.radio(
         "Contas a Pagar", "Contas a Receber", "Entregas", "Relatórios", "Normas", "Importar Planilha"
     ]
 )
+
+# --- Função genérica para Grid Editável (Salvar alterações na tabela) ---
+def renderizar_tabela_editavel(tabela, nome_exibicao):
+    st.subheader(f"Gerenciamento de {nome_exibicao}")
+    st.info("💡 Você pode editar os dados diretamente na tabela abaixo ou excluir linhas selecionando-as. Clique em 'Salvar Alterações' para gravar no banco.")
+    
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(f"SELECT * FROM {tabela}", conn)
+    conn.close()
+    
+    # st.data_editor permite edição direta, adição e exclusão de linhas
+    df_editado = st.data_editor(df, num_rows="dynamic", key=f"editor_{tabela}", use_container_width=True)
+    
+    if st.button(f"💾 Salvar Alterações em {nome_exibicao}", key=f"btn_save_{tabela}"):
+        conn = sqlite3.connect(DB_FILE)
+        try:
+            # Substitui os dados da tabela com base no DataFrame editado na tela
+            df_editado.to_sql(tabela, conn, if_exists="replace", index=False)
+            st.success(f"Alterações em {nome_exibicao} salvas com sucesso!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao salvar os dados: {e}")
+        finally:
+            conn.close()
 
 # 1. PAINEL GERAL
 if opcao == "Painel Geral":
@@ -68,12 +98,10 @@ if opcao == "Painel Geral":
     df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
     conn.close()
     
-    # Cálculos
     total_faturado = df_vendas["valor_total"].sum() if not df_vendas.empty else 0.0
     total_despesas = df_despesas["valor"].sum() if not df_despesas.empty else 0.0
     total_compras = df_compras["valor_total"].sum() if not df_compras.empty else 0.0
     
-    # Saldo = Vendas - (Despesas + Compras)
     total_saidas = total_despesas + total_compras
     saldo_caixa = total_faturado - total_saidas
     
@@ -86,198 +114,179 @@ if opcao == "Painel Geral":
 # 2. FORNECEDORES
 elif opcao == "Fornecedores":
     st.title("Gestão de Fornecedores")
-    with st.form("form_fornecedor", clear_on_submit=True):
-        f_nome = st.text_input("Nome do Fornecedor")
-        f_contato = st.text_input("Contato / Responsável")
-        f_tel = st.text_input("Telefone")
-        f_end = st.text_input("Endereço")
-        f_prod = st.text_input("Produtos Fornecidos")
-        f_prazo = st.text_input("Prazo de Pagamento")
-        f_obs = st.text_input("Observações")
-        if st.form_submit_button("Cadastrar Fornecedor"):
-            if f_nome:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone, endereco, produto_fornecido, prazo_pagamento, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          (f_nome, f_contato, f_tel, f_end, f_prod, f_prazo, f_obs))
-                conn.commit()
-                conn.close()
-                st.success("Fornecedor cadastrado com sucesso!")
-                st.rerun()
-            else:
-                st.error("O nome do fornecedor é obrigatório.")
-
-    st.subheader("Lista de Fornecedores")
-    conn = sqlite3.connect(DB_FILE)
-    df_forn = pd.read_sql_query("SELECT * FROM fornecedores", conn)
-    conn.close()
-    st.dataframe(df_forn, use_container_width=True)
+    renderizar_tabela_editavel("fornecedores", "Fornecedores")
 
 # 3. COMPRAS DE PRODUTOS
 elif opcao == "Compras de produtos":
     st.title("Compras de Produtos e Histórico")
-    with st.form("form_compra", clear_on_submit=True):
-        prod = st.selectbox("Selecione o Produto", LISTA_PRODUTOS_MESTRA)
-        qtd = st.number_input("Quantidade (KG/Unid)", min_value=0.1)
-        val = st.number_input("Valor Total R$", min_value=0.0)
-        if st.form_submit_button("Registrar Compra"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            hoje = datetime.now().strftime("%Y-%m-%d")
-            c.execute("INSERT INTO compras (produto, qtd, valor_total, data_compra) VALUES (?, ?, ?, ?)", (prod, qtd, val, hoje))
-            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Compra: {prod}", "Saída", val, hoje))
-            conn.commit()
-            conn.close()
-            st.success("Compra registrada com sucesso!")
-            st.rerun()
-
-    st.subheader("Histórico de Compras")
-    conn = sqlite3.connect(DB_FILE)
-    df_compras_db = pd.read_sql_query("SELECT * FROM compras", conn)
-    conn.close()
-    st.dataframe(df_compras_db, use_container_width=True)
+    renderizar_tabela_editavel("compras", "Compras")
 
 # 4. ESTOQUE
 elif opcao == "Estoque":
     st.title("Controle de Estoque Atualizado")
-    
     conn = sqlite3.connect(DB_FILE)
     df_compras = pd.read_sql_query("SELECT produto, SUM(qtd) as total_comprado FROM compras GROUP BY produto", conn)
     df_vendas = pd.read_sql_query("SELECT produto, SUM(qtd_kg) as total_vendido FROM vendas GROUP BY produto", conn)
-    df_prod_info = pd.read_sql_query("SELECT nome as produto, categoria, preco_kg FROM produtos", conn)
     conn.close()
 
     if not df_compras.empty:
         df_estoque = df_compras.merge(df_vendas, on="produto", how="left").fillna(0)
         df_estoque["Estoque Atual"] = df_estoque["total_comprado"] - df_estoque["total_vendido"]
-        
-        if not df_prod_info.empty:
-            df_estoque = df_estoque.merge(df_prod_info, on="produto", how="left")
-            
-        st.subheader("Saldo em Estoque (Compras - Vendas)")
         st.dataframe(df_estoque, use_container_width=True)
     else:
-        st.info("Nenhuma compra registrada ainda para calcular o estoque.")
+        st.info("Nenhuma compra registrada ainda.")
 
 # 5. CLIENTES
 elif opcao == "Clientes":
     st.title("Cadastro e Gestão de Clientes")
-    with st.form("form_cliente", clear_on_submit=True):
-        nome_cli = st.text_input("Nome do Cliente")
-        tel_cli = st.text_input("Telefone")
-        cidade_cli = st.text_input("Cidade")
-        if st.form_submit_button("Cadastrar Cliente"):
-            if nome_cli:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                hoje = datetime.now().strftime("%Y-%m-%d")
-                c.execute("INSERT INTO clientes (nome, telefone, cidade, data_cad) VALUES (?, ?, ?, ?)", (nome_cli, tel_cli, cidade_cli, hoje))
-                conn.commit()
-                conn.close()
-                st.success("Cliente cadastrado com sucesso!")
-                st.rerun()
-            else:
-                st.error("O nome do cliente é obrigatório.")
-    conn = sqlite3.connect(DB_FILE)
-    df_cli = pd.read_sql_query("SELECT * FROM clientes", conn)
-    conn.close()
-    st.dataframe(df_cli, use_container_width=True)
+    renderizar_tabela_editavel("clientes", "Clientes")
 
 # 6. VENDAS
 elif opcao == "Vendas":
-    st.title("Registrar Venda e Histórico")
-    with st.form("form_venda", clear_on_submit=True):
-        cliente_nome = st.text_input("Nome do Cliente (Opcional)")
-        produto_sel = st.selectbox("Produto", LISTA_PRODUTOS_MESTRA)
-        qtd_kg = st.number_input("Quantidade", min_value=0.1, format="%.2f")
-        preco_unit = st.number_input("Preço Unitário / KG (R$)", min_value=0.0, format="%.2f")
-        
-        if st.form_submit_button("Finalizar Venda"):
-            conn = sqlite3.connect(DB_FILE)
-            c = conn.cursor()
-            val_tot = qtd_kg * preco_unit
-            c.execute("INSERT INTO vendas (cliente, produto, qtd_kg, valor_total, data_venda) VALUES (?, ?, ?, ?, ?)",
-                      (cliente_nome if cliente_nome else "Cliente Balcão", produto_sel, qtd_kg, val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-            c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Venda: {produto_sel}", "Entrada", val_tot, datetime.now().strftime("%Y-%m-%d %H:%M")))
-            conn.commit()
-            conn.close()
-            st.success("Venda realizada com sucesso!")
-            st.rerun()
-
-    st.subheader("Histórico de Vendas")
-    conn = sqlite3.connect(DB_FILE)
-    df_vendas_db = pd.read_sql_query("SELECT * FROM vendas", conn)
-    conn.close()
-    st.dataframe(df_vendas_db, use_container_width=True)
+    st.title("Registro de Vendas e Histórico")
+    renderizar_tabela_editavel("vendas", "Vendas")
 
 # 7. FINANCEIRO
 elif opcao == "Financeiro":
-    st.title("Controle Financeiro (Entradas e Saídas)")
+    st.title("Controle Financeiro")
+    
     conn = sqlite3.connect(DB_FILE)
     df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
     conn.close()
-    st.dataframe(df_fin, use_container_width=True)
+    
+    if not df_fin.empty:
+        total_entradas = df_fin[df_fin["tipo"] == "Entrada"]["valor"].sum()
+        total_saidas = df_fin[df_fin["tipo"] == "Saída"]["valor"].sum()
+        saldo_caixa = total_entradas - total_saidas
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Entradas", f"R$ {total_entradas:,.2f}")
+        col2.metric("Saídas", f"R$ {total_saidas:,.2f}")
+        col3.metric("Saldo Líquido", f"R$ {saldo_caixa:,.2f}")
+        
+        st.markdown("---")
+    
+    renderizar_tabela_editavel("financeiro", "Movimentações Financeiras")
 
 # 8. DESPESAS GERAIS
 elif opcao == "Despesas Gerais":
     st.title("Registro de Despesas Gerais")
-    with st.form("form_despesa", clear_on_submit=True):
-        desc_esp = st.text_input("Descrição da Despesa")
-        val_esp = st.number_input("Valor R$", min_value=0.0)
-        if st.form_submit_button("Registrar Despesa"):
-            if desc_esp and val_esp > 0:
-                conn = sqlite3.connect(DB_FILE)
-                c = conn.cursor()
-                hoje = datetime.now().strftime("%Y-%m-%d")
-                c.execute("INSERT INTO despesas (data_desp, categoria, descricao, valor, pagamento) VALUES (?, ?, ?, ?, ?)", (hoje, "Geral", desc_esp, val_esp, "Dinheiro"))
-                c.execute("INSERT INTO financeiro (descricao, tipo, valor, data_mov) VALUES (?, ?, ?, ?)", (f"Despesa: {desc_esp}", "Saída", val_esp, hoje))
-                conn.commit()
-                conn.close()
-                st.success("Despesa registrada com sucesso!")
-                st.rerun()
-            else:
-                st.error("Preencha a descrição e o valor corretamente.")
-    
-    st.subheader("Histórico de Despesas")
-    conn = sqlite3.connect(DB_FILE)
-    df_esp = pd.read_sql_query("SELECT * FROM despesas", conn)
-    conn.close()
-    st.dataframe(df_esp, use_container_width=True)
+    renderizar_tabela_editavel("despesas", "Despesas")
 
 # 9. CONTAS A PAGAR
 elif opcao == "Contas a Pagar":
     st.title("Contas a Pagar")
-    conn = sqlite3.connect(DB_FILE)
-    df_cp = pd.read_sql_query("SELECT * FROM contas_pagar", conn)
-    conn.close()
-    st.dataframe(df_cp, use_container_width=True)
+    renderizar_tabela_editavel("contas_pagar", "Contas a Pagar")
 
 # 10. CONTAS A RECEBER
 elif opcao == "Contas a Receber":
     st.title("Contas a Receber")
-    conn = sqlite3.connect(DB_FILE)
-    df_cr = pd.read_sql_query("SELECT * FROM contas_receber", conn)
-    conn.close()
-    st.dataframe(df_cr, use_container_width=True)
+    renderizar_tabela_editavel("contas_receber", "Contas a Receber")
 
 # 11. ENTREGAS
 elif opcao == "Entregas":
     st.title("Controle de Entregas")
-    conn = sqlite3.connect(DB_FILE)
-    df_ent = pd.read_sql_query("SELECT * FROM entregas", conn)
-    conn.close()
-    st.dataframe(df_ent, use_container_width=True)
+    renderizar_tabela_editavel("entregas", "Entregas")
 
-# 12-14. DEMAIS MÓDULOS (RELATÓRIOS, NORMAS, IMPORTAÇÃO...)
-# (Mantive a estrutura de importação que você forneceu no código anterior)
+# 12. RELATÓRIOS
 elif opcao == "Relatórios":
-    st.title("Relatórios do Sistema")
-    st.info("Módulo de relatórios gerenciais.")
+    st.title("Relatórios e Indicadores Gerenciais")
+    
+    conn = sqlite3.connect(DB_FILE)
+    df_vendas = pd.read_sql_query("SELECT * FROM vendas", conn)
+    df_despesas = pd.read_sql_query("SELECT * FROM despesas", conn)
+    df_compras = pd.read_sql_query("SELECT * FROM compras", conn)
+    df_fin = pd.read_sql_query("SELECT * FROM financeiro", conn)
+    conn.close()
+    
+    st.subheader("📊 Resumo Consolidado")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total de Vendas Registradas", len(df_vendas))
+    c2.metric("Total de Despesas", f"R$ {df_despesas['valor'].sum() if not df_despesas.empty else 0.0:,.2f}")
+    c3.metric("Total em Compras", f"R$ {df_compras['valor_total'].sum() if not df_compras.empty else 0.0:,.2f}")
+    
+    st.markdown("---")
+    st.subheader("📋 Extrato Financeiro Completo (Entradas e Saídas)")
+    if not df_fin.empty:
+        st.dataframe(df_fin, use_container_width=True)
+    else:
+        st.info("Nenhuma movimentação financeira registrada.")
+        
+    st.markdown("---")
+    st.subheader("📦 Vendas por Produto")
+    if not df_vendas.empty:
+        df_vendas_resumo = df_vendas.groupby("produto")[["qtd_kg", "valor_total"]].sum().reset_index()
+        st.dataframe(df_vendas_resumo, use_container_width=True)
+    else:
+        st.info("Nenhuma venda realizada para gerar o relatório de produtos.")
 
+# 13. NORMAS
 elif opcao == "Normas":
-    st.title("Normas e Procedimentos")
-    st.info("Documentação interna e normas operacionais.")
+    st.title("Normas e Procedimentos Operacionais - Kero Fish")
+    st.markdown("""
+    ### 1. Higiene e Manipulação de Pescados
+    * **Uso de EPIs:** Obrigatório o uso de toucas, aventais impermeáveis, luvas adequadas e botas de borracha limpas durante o manuseio de peixes e frutos do mar.
+    * **Cadeia de Frio:** O pescado fresco deve permanecer sob refrigeração adequada ou em contato direto com gelo limpo em escamas.
+    * **Limpeza:** Bancadas, facas, tábuas de corte e caixas térmicas devem ser rigorosamente higienizadas antes e após o expediente.
 
+    ### 2. Controle de Estoque e Validade
+    * **Método PEPS:** Utilize sempre o princípio **Primeiro a Entrar, Primeiro a Sair (PEPS)** para correta rotação dos produtos.
+    * **Conferência:** Toda mercadoria recebida deve passar por dupla conferência de peso, temperatura e integridade antes do aceite.
+
+    ### 3. Atendimento e Vendas
+    * **Cordialidade:** Atendimento ágil e prestativo, auxiliando o cliente com informações sobre cortes e conservação.
+    * **Registro Rigoroso:** Nenhuma saída de mercadoria pode ser feita sem o devido lançamento imediato no ERP.
+    """)
+
+# 14. IMPORTAR PLANILHA
 elif opcao == "Importar Planilha":
-    st.title("Importação de Dados")
-    # [Código de importação mantido conforme sua solicitação original...]
+    st.title("Importação de Dados do Excel")
+    st.write("Clique no botão abaixo para ler o arquivo do Excel que está na raiz e importar Fornecedores e Clientes para o banco de dados.")
+    
+    if st.button("Confirmar Importação de Todas as Abas"):
+        arquivo_excel = None
+        for f in os.listdir("."):
+            if f.startswith("KERO FISH") and f.endswith(".xlsx"):
+                arquivo_excel = f
+                break
+        
+        if arquivo_excel:
+            try:
+                xls = pd.ExcelFile(arquivo_excel)
+                conn = sqlite3.connect(DB_FILE)
+                c = conn.cursor()
+                
+                importadas = []
+                for sheet_name in xls.sheet_names:
+                    df = pd.read_excel(xls, sheet_name=sheet_name)
+                    s_lower = sheet_name.lower()
+                    
+                    if "fornecedor" in s_lower:
+                        for _, row in df.iterrows():
+                            vals = [str(val) for val in row.values if pd.notna(val)]
+                            if vals:
+                                nome_f = str(row.iloc[0]) if len(row) > 0 and pd.notna(row.iloc[0]) else "Desconhecido"
+                                contato_f = str(row.iloc[1]) if len(row) > 1 and pd.notna(row.iloc[1]) else ""
+                                tel_f = str(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else ""
+                                c.execute("INSERT INTO fornecedores (fornecedor, contato, telefone) VALUES (?, ?, ?)", (nome_f, contato_f, tel_f))
+                        importadas.append(f"Fornecedores ({sheet_name})")
+
+                    elif "cliente" in s_lower:
+                        for _, row in df.iterrows():
+                            vals = [str(val) for val in row.values if pd.notna(val)]
+                            if vals:
+                                nome_c = str(row.iloc[0]) if len(row) > 0 and pd.notna(row.iloc[0]) else "Desconhecido"
+                                tel_c = str(row.iloc[1]) if len(row) > 1 and pd.notna(row.iloc[1]) else ""
+                                cidade_c = str(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else ""
+                                c.execute("INSERT INTO clientes (nome, telefone, cidade, data_cad) VALUES (?, ?, ?, ?)", 
+                                          (nome_c, tel_c, cidade_c, datetime.now().strftime("%Y-%m-%d")))
+                        importadas.append(f"Clientes ({sheet_name})")
+                        
+                conn.commit()
+                conn.close()
+                st.success(f"Planilha processada com sucesso! Abas importadas: {', '.join(importadas)}")
+            except Exception as e:
+                st.error(f"Erro ao ler a planilha: {e}")
+        else:
+            st.error("Arquivo do Excel não foi encontrado na raiz do projeto.")
+
