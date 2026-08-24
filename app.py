@@ -24,6 +24,7 @@ Principais melhorias:
 import os
 import shutil
 import sqlite3
+from pathlib import Path
 from datetime import datetime, date
 
 import pandas as pd
@@ -32,8 +33,13 @@ import streamlit as st
 
 st.set_page_config(page_title="Kero Fish ERP", layout="wide")
 
-DB_FILE = "kerofish.db"
-BACKUP_DIR = "backups"
+# O banco fica sempre junto do aplicativo, e não no diretório de execução.
+# Isso evita que o Streamlit crie outro kerofish.db quando o diretório de
+# execução mudar entre uma versão e outra. A variável de ambiente abaixo
+# permite apontar explicitamente para um banco persistente, se desejado.
+APP_DIR = Path(__file__).resolve().parent
+DB_FILE = os.environ.get("KEROFISH_DB_PATH", str(APP_DIR / "kerofish.db"))
+BACKUP_DIR = os.environ.get("KEROFISH_BACKUP_DIR", str(APP_DIR / "backups"))
 
 FORMAS_PAGAMENTO = [
     "Dinheiro",
@@ -92,9 +98,85 @@ PRODUTOS_INICIAIS = [
 
 
 def get_conn():
+    Path(DB_FILE).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
+
+def _db_record_count(path):
+    """Pontua um banco existente para escolher o banco antigo correto."""
+    try:
+        con = sqlite3.connect(path)
+        total = 0
+        for tabela in ("clientes", "fornecedores", "produtos", "compras", "vendas", "despesas", "contas_pagar", "contas_receber", "financeiro"):
+            try:
+                total += int(con.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0])
+            except Exception:
+                pass
+        con.close()
+        return total
+    except Exception:
+        return -1
+
+
+def _localizar_banco_antigo():
+    """Procura um kerofish.db antigo antes de criar um banco vazio."""
+    alvo = Path(DB_FILE).resolve()
+    candidatos = []
+    locais = [
+        alvo.parent,
+        Path.cwd(),
+        APP_DIR,
+        APP_DIR.parent,
+        Path("/mount/src"),
+        Path("/app"),
+    ]
+    vistos=set()
+    for base in locais:
+        try:
+            base=base.resolve()
+        except Exception:
+            continue
+        if not base.exists() or str(base) in vistos:
+            continue
+        vistos.add(str(base))
+        try:
+            for f in base.rglob("kerofish.db"):
+                f=f.resolve()
+                if f == alvo or not f.is_file():
+                    continue
+                score=_db_record_count(f)
+                if score > 0:
+                    candidatos.append((score, f))
+        except Exception:
+            continue
+    if not candidatos:
+        return None
+    candidatos.sort(key=lambda x: x[0], reverse=True)
+    return candidatos[0][1]
+
+
+def garantir_banco_correto():
+    """Evita que uma atualização silenciosamente crie um banco vazio."""
+    alvo=Path(DB_FILE)
+    alvo.parent.mkdir(parents=True, exist_ok=True)
+    if alvo.exists():
+        return
+    antigo=_localizar_banco_antigo()
+    if antigo:
+        shutil.copy2(antigo, alvo)
+
+
+def backup_db(label="manual"):
+    Path(BACKUP_DIR).mkdir(parents=True, exist_ok=True)
+    if not os.path.exists(DB_FILE):
+        return None
+    stamp=datetime.now().strftime("%Y%m%d_%H%M%S")
+    destino=os.path.join(BACKUP_DIR, f"kerofish_{label}_{stamp}.db")
+    shutil.copy2(DB_FILE, destino)
+    return destino
 
 
 def column_exists(conn, table, column):
@@ -353,14 +435,7 @@ def init_db():
     conn.close()
 
 
-def backup_db():
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    destino = os.path.join(BACKUP_DIR, f"kerofish_backup_{stamp}.db")
-    if os.path.exists(DB_FILE):
-        shutil.copy2(DB_FILE, destino)
-        return destino
-    return None
+# backup_db definido no início do arquivo para garantir o banco correto.
 
 
 def df_query(sql, params=()):
@@ -1631,6 +1706,35 @@ def pagina_importar():
 def pagina_backup():
     st.title("💾 Backup e Segurança")
     st.write("Faça backups frequentes do banco de dados antes de atualizações importantes.")
+    st.info(f"Banco ativo: {DB_FILE}")
+
+    st.subheader("🔐 Restaurar um banco existente")
+    arquivo_db = st.file_uploader("Selecione um backup .db do Kero Fish", type=["db"], key="restaurar_db_upload")
+    if arquivo_db is not None and st.button("♻️ RESTAURAR ESTE BANCO", key="btn_restaurar_db", type="primary"):
+        # Backup do banco atual antes de substituir.
+        backup_atual = backup_db("antes_restauracao")
+        tmp = Path(BACKUP_DIR) / "_restore_temp.db"
+        try:
+            tmp.write_bytes(arquivo_db.getbuffer())
+            if _db_record_count(tmp) <= 0:
+                st.error("O arquivo selecionado não contém registros Kero Fish válidos.")
+            else:
+                # Valida integridade antes de substituir.
+                con=sqlite3.connect(tmp)
+                ok=con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+                con.close()
+                if not ok:
+                    st.error("O banco selecionado está corrompido.")
+                else:
+                    shutil.copy2(tmp, DB_FILE)
+                    st.success("Banco restaurado. O backup anterior foi preservado.")
+                    st.rerun()
+        except Exception as exc:
+            st.error(f"Não foi possível restaurar o banco: {exc}")
+        finally:
+            try: tmp.unlink()
+            except Exception: pass
+
 
     if st.button("Criar backup agora"):
         destino = backup_db()
@@ -1757,11 +1861,23 @@ def painel():
         )
 
 
-# Inicialização
+# Inicialização segura: primeiro localiza/reutiliza o banco correto e cria
+# uma cópia antes de qualquer migração de estrutura.
+garantir_banco_correto()
+if os.path.exists(DB_FILE):
+    try:
+        if _db_record_count(DB_FILE) > 0:
+            # backup de segurança antes da migração desta versão
+            backups_existentes=list(Path(BACKUP_DIR).glob("kerofish_pre_update_*.db")) if Path(BACKUP_DIR).exists() else []
+            if not backups_existentes:
+                backup_db("pre_update")
+    except Exception:
+        pass
 init_db()
 
 # Logo
 st.sidebar.title("Kero Fish")
+st.sidebar.caption(f"Banco: {Path(DB_FILE).name}")
 logo_encontrada = None
 for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "JPEG"]:
     if os.path.exists(f"logo.{ext}"):
