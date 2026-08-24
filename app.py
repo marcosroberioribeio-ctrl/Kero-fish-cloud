@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Kero Fish ERP - versão 10 - edição direta no grid
+Kero Fish ERP - versão aperfeiçoada
 Base independente para análise/uso do arquivo enviado pelo usuário.
 
 Principais melhorias:
@@ -24,7 +24,6 @@ Principais melhorias:
 import os
 import shutil
 import sqlite3
-from pathlib import Path
 from datetime import datetime, date
 
 import pandas as pd
@@ -33,13 +32,8 @@ import streamlit as st
 
 st.set_page_config(page_title="Kero Fish ERP", layout="wide")
 
-# O banco fica sempre junto do aplicativo, e não no diretório de execução.
-# Isso evita que o Streamlit crie outro kerofish.db quando o diretório de
-# execução mudar entre uma versão e outra. A variável de ambiente abaixo
-# permite apontar explicitamente para um banco persistente, se desejado.
-APP_DIR = Path(__file__).resolve().parent
-DB_FILE = os.environ.get("KEROFISH_DB_PATH", str(APP_DIR / "kerofish.db"))
-BACKUP_DIR = os.environ.get("KEROFISH_BACKUP_DIR", str(APP_DIR / "backups"))
+DB_FILE = "kerofish.db"
+BACKUP_DIR = "backups"
 
 FORMAS_PAGAMENTO = [
     "Dinheiro",
@@ -98,85 +92,9 @@ PRODUTOS_INICIAIS = [
 
 
 def get_conn():
-    Path(DB_FILE).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_FILE)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
     return conn
-
-
-def _db_record_count(path):
-    """Pontua um banco existente para escolher o banco antigo correto."""
-    try:
-        con = sqlite3.connect(path)
-        total = 0
-        for tabela in ("clientes", "fornecedores", "produtos", "compras", "vendas", "despesas", "contas_pagar", "contas_receber", "financeiro"):
-            try:
-                total += int(con.execute(f"SELECT COUNT(*) FROM {tabela}").fetchone()[0])
-            except Exception:
-                pass
-        con.close()
-        return total
-    except Exception:
-        return -1
-
-
-def _localizar_banco_antigo():
-    """Procura um kerofish.db antigo antes de criar um banco vazio."""
-    alvo = Path(DB_FILE).resolve()
-    candidatos = []
-    locais = [
-        alvo.parent,
-        Path.cwd(),
-        APP_DIR,
-        APP_DIR.parent,
-        Path("/mount/src"),
-        Path("/app"),
-    ]
-    vistos=set()
-    for base in locais:
-        try:
-            base=base.resolve()
-        except Exception:
-            continue
-        if not base.exists() or str(base) in vistos:
-            continue
-        vistos.add(str(base))
-        try:
-            for f in base.rglob("kerofish.db"):
-                f=f.resolve()
-                if f == alvo or not f.is_file():
-                    continue
-                score=_db_record_count(f)
-                if score > 0:
-                    candidatos.append((score, f))
-        except Exception:
-            continue
-    if not candidatos:
-        return None
-    candidatos.sort(key=lambda x: x[0], reverse=True)
-    return candidatos[0][1]
-
-
-def garantir_banco_correto():
-    """Evita que uma atualização silenciosamente crie um banco vazio."""
-    alvo=Path(DB_FILE)
-    alvo.parent.mkdir(parents=True, exist_ok=True)
-    if alvo.exists():
-        return
-    antigo=_localizar_banco_antigo()
-    if antigo:
-        shutil.copy2(antigo, alvo)
-
-
-def backup_db(label="manual"):
-    Path(BACKUP_DIR).mkdir(parents=True, exist_ok=True)
-    if not os.path.exists(DB_FILE):
-        return None
-    stamp=datetime.now().strftime("%Y%m%d_%H%M%S")
-    destino=os.path.join(BACKUP_DIR, f"kerofish_{label}_{stamp}.db")
-    shutil.copy2(DB_FILE, destino)
-    return destino
 
 
 def column_exists(conn, table, column):
@@ -435,7 +353,14 @@ def init_db():
     conn.close()
 
 
-# backup_db definido no início do arquivo para garantir o banco correto.
+def backup_db():
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    destino = os.path.join(BACKUP_DIR, f"kerofish_backup_{stamp}.db")
+    if os.path.exists(DB_FILE):
+        shutil.copy2(DB_FILE, destino)
+        return destino
+    return None
 
 
 def df_query(sql, params=()):
@@ -477,63 +402,15 @@ def get_produtos():
 
 
 def estoque_produto(produto):
-    """Calcula o estoque real diretamente a partir das compras e vendas.
-
-    Compras = entradas; vendas = saídas. Ajustes/perdas manuais continuam
-    vindo da tabela de movimentos_estoque. Isso também corrige estoques
-    históricos quando compras/vendas antigas não possuem movimento gravado.
-    """
-    compras = scalar(
-        "SELECT COALESCE(SUM(qtd),0) FROM compras WHERE produto=?",
+    entrada = scalar(
+        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND tipo IN ('Entrada','Ajuste Entrada')",
         (produto,),
     )
-    vendas = scalar(
-        "SELECT COALESCE(SUM(qtd_kg),0) FROM vendas WHERE produto=?",
+    saida = scalar(
+        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND tipo IN ('Saída','Perda','Ajuste Saída')",
         (produto,),
     )
-    ajustes_entrada = scalar(
-        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque "
-        "WHERE produto=? AND origem_tipo='manual' AND tipo='Ajuste Entrada'",
-        (produto,),
-    )
-    ajustes_saida = scalar(
-        "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque "
-        "WHERE produto=? AND origem_tipo='manual' AND tipo IN ('Ajuste Saída','Perda')",
-        (produto,),
-    )
-    return float(compras or 0) - float(vendas or 0) + float(ajustes_entrada or 0) - float(ajustes_saida or 0)
-
-
-def resumo_estoque():
-    """Retorna o estoque por produto, sempre baseado em compras - vendas + ajustes."""
-    produtos = get_produtos()
-    registros = []
-    for _, r in produtos.iterrows():
-        produto = r["nome"]
-        compras = float(scalar("SELECT COALESCE(SUM(qtd),0) FROM compras WHERE produto=?", (produto,)) or 0)
-        vendas = float(scalar("SELECT COALESCE(SUM(qtd_kg),0) FROM vendas WHERE produto=?", (produto,)) or 0)
-        ajuste_ent = float(scalar(
-            "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND origem_tipo='manual' AND tipo='Ajuste Entrada'",
-            (produto,)
-        ) or 0)
-        ajuste_saida = float(scalar(
-            "SELECT COALESCE(SUM(quantidade),0) FROM movimentos_estoque WHERE produto=? AND origem_tipo='manual' AND tipo IN ('Ajuste Saída','Perda')",
-            (produto,)
-        ) or 0)
-        estoque = compras - vendas + ajuste_ent - ajuste_saida
-        minimo = float(r["estoque_minimo"] or 0)
-        registros.append({
-            "Produto": produto,
-            "Categoria": r["categoria"],
-            "Compras": compras,
-            "Vendas": vendas,
-            "Ajustes +": ajuste_ent,
-            "Ajustes -": ajuste_saida,
-            "Estoque atual": estoque,
-            "Mínimo": minimo,
-            "Situação": "⚠️ BAIXO" if estoque <= minimo else "OK",
-        })
-    return pd.DataFrame(registros)
+    return float(entrada or 0) - float(saida or 0)
 
 
 def registrar_movimento(produto, tipo, quantidade, custo=0, origem_tipo="", origem_id=None, observacoes=""):
@@ -694,7 +571,7 @@ def obter_previsto():
         SELECT vencimento AS data,
                'A receber: ' || COALESCE(cliente,'') || ' - ' || descricao AS descricao,
                'Entrada prevista' AS tipo,
-               CASE WHEN valor - COALESCE(valor_recebido,0) > 0 THEN valor - COALESCE(valor_recebido,0) ELSE 0 END AS valor,
+               MAX(valor - COALESCE(valor_recebido,0), 0) AS valor,
                '' AS forma_pagamento,
                'conta_receber' AS origem
         FROM contas_receber
@@ -705,7 +582,7 @@ def obter_previsto():
         SELECT vencimento AS data,
                'A pagar: ' || COALESCE(fornecedor,'') || ' - ' || descricao AS descricao,
                'Saída prevista' AS tipo,
-               CASE WHEN valor - COALESCE(valor_pago,0) > 0 THEN valor - COALESCE(valor_pago,0) ELSE 0 END AS valor,
+               MAX(valor - COALESCE(valor_pago,0), 0) AS valor,
                '' AS forma_pagamento,
                'conta_pagar' AS origem
         FROM contas_pagar
@@ -720,11 +597,11 @@ def resumo_financeiro_por_origem():
     vendas = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE origem_tipo='venda' AND tipo='Entrada'")
     despesas = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE origem_tipo='despesa' AND tipo='Saída'")
     pagar = scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_pago,0) > 0 THEN valor - COALESCE(valor_pago,0) ELSE 0 END),0)
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_pago,0),0)),0)
         FROM contas_pagar WHERE status IN ('Pendente','Parcial')
     """)
     receber = scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_recebido,0) > 0 THEN valor - COALESCE(valor_recebido,0) ELSE 0 END),0)
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_recebido,0),0)),0)
         FROM contas_receber WHERE status IN ('Pendente','Parcial')
     """)
     return {
@@ -748,515 +625,207 @@ def renderizar_tabela_simples(tabela, titulo, colunas_ocultar=None):
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-
-def _parse_date_text(value):
-    try:
-        return datetime.strptime(str(value), "%Y-%m-%d").date()
-    except Exception:
-        return date.today()
-
-
-def _status_por_saldo(total, pago):
-    total = float(total or 0)
-    pago = min(max(float(pago or 0), 0), total)
-    return "Pago" if total > 0 and pago >= total else ("Parcial" if pago > 0 else "Pendente")
-
-
-def sincronizar_origem_financeira(origem_tipo, origem_id):
-    """Recalcula caixa/contas vinculadas depois de editar uma compra, venda ou despesa."""
-    conn = get_conn()
-    conn.execute("DELETE FROM financeiro WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
-
-    if origem_tipo == "compra":
-        row = conn.execute("SELECT * FROM compras WHERE id=?", (origem_id,)).fetchone()
-        if row:
-            total = float(row["valor_total"] or 0)
-            conta = conn.execute("SELECT id, valor_pago FROM contas_pagar WHERE origem_tipo='compra' AND origem_id=? ORDER BY id DESC LIMIT 1", (origem_id,)).fetchone()
-            pago = float(conta["valor_pago"] or 0) if conta else 0.0
-            if row["status_pagamento"] == "Pago":
-                pago = total
-            pago = min(max(pago, 0), total)
-            if pago > 0:
-                conn.execute("""INSERT INTO financeiro
-                    (data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
-                    VALUES (?,?,?,?,?,?,?)""",
-                    (row["data_compra"], f"Compra #{origem_id}: {row['produto']}", "Saída", pago,
-                     row["forma_pagamento"], "compra", origem_id))
-            saldo = total - pago
-            if saldo > 0:
-                if conta:
-                    conn.execute("""UPDATE contas_pagar SET fornecedor=?, descricao=?, valor=?, vencimento=?,
-                        valor_pago=?, status=?, origem_tipo='compra', origem_id=? WHERE id=?""",
-                        (row["fornecedor"], f"Compra #{origem_id}: {row['produto']}", total,
-                         row["vencimento"] or row["data_compra"], pago, _status_por_saldo(total,pago), origem_id, conta["id"]))
-                else:
-                    conn.execute("""INSERT INTO contas_pagar
-                        (fornecedor,descricao,valor,valor_pago,vencimento,status,origem_tipo,origem_id)
-                        VALUES (?,?,?,?,?,?,?,?)""",
-                        (row["fornecedor"], f"Compra #{origem_id}: {row['produto']}", total, pago,
-                         row["vencimento"] or row["data_compra"], _status_por_saldo(total,pago), "compra", origem_id))
-            elif conta:
-                conn.execute("UPDATE contas_pagar SET fornecedor=?, descricao=?, valor=?, vencimento=?, valor_pago=?, status=? WHERE id=?",
-                             (row["fornecedor"], f"Compra #{origem_id}: {row['produto']}", total,
-                              row["vencimento"] or row["data_compra"], pago, "Pago", conta["id"]))
-
-    elif origem_tipo == "venda":
-        row = conn.execute("SELECT * FROM vendas WHERE id=?", (origem_id,)).fetchone()
-        if row:
-            total = float(row["valor_total"] or 0)
-            recebido = min(max(float(row["valor_recebido"] or 0),0), total)
-            if recebido > 0:
-                conn.execute("""INSERT INTO financeiro
-                    (data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
-                    VALUES (?,?,?,?,?,?,?)""",
-                    (row["data_venda"], f"Venda {row['pedido']} - recebimento", "Entrada", recebido,
-                     row["forma_pagamento"], "venda", origem_id))
-            conta = conn.execute("SELECT id, valor_recebido FROM contas_receber WHERE origem_tipo='venda' AND origem_id=? ORDER BY id DESC LIMIT 1", (origem_id,)).fetchone()
-            recebido_conta = max(recebido, float(conta["valor_recebido"] or 0) if conta else 0.0)
-            recebido_conta = min(recebido_conta, total)
-            saldo = total - recebido_conta
-            if saldo > 0:
-                if conta:
-                    conn.execute("""UPDATE contas_receber SET cliente=?, descricao=?, valor=?, vencimento=?,
-                        valor_recebido=?, status=? WHERE id=?""",
-                        (row["cliente"], f"Venda {row['pedido']}", total, row["vencimento"] or row["data_venda"],
-                         recebido_conta, _status_por_saldo(total,recebido_conta), conta["id"]))
-                else:
-                    conn.execute("""INSERT INTO contas_receber
-                        (cliente,descricao,valor,valor_recebido,vencimento,status,origem_tipo,origem_id)
-                        VALUES (?,?,?,?,?,?,?,?)""",
-                        (row["cliente"], f"Venda {row['pedido']}", total, recebido_conta,
-                         row["vencimento"] or row["data_venda"], _status_por_saldo(total,recebido_conta), "venda", origem_id))
-            elif conta:
-                conn.execute("UPDATE contas_receber SET cliente=?, descricao=?, valor=?, vencimento=?, valor_recebido=?, status='Pago' WHERE id=?",
-                             (row["cliente"], f"Venda {row['pedido']}", total, row["vencimento"] or row["data_venda"], recebido_conta, conta["id"]))
-
-    elif origem_tipo == "despesa":
-        row = conn.execute("SELECT * FROM despesas WHERE id=?", (origem_id,)).fetchone()
-        if row:
-            total = float(row["valor"] or 0)
-            conta = conn.execute("SELECT id, valor_pago FROM contas_pagar WHERE origem_tipo='despesa' AND origem_id=? ORDER BY id DESC LIMIT 1", (origem_id,)).fetchone()
-            pago = float(conta["valor_pago"] or 0) if conta else (total if row["status"] == "Pago" else 0)
-            pago = min(max(pago,0),total)
-            if pago > 0:
-                conn.execute("""INSERT INTO financeiro
-                    (data_mov,descricao,tipo,valor,forma_pagamento,origem_tipo,origem_id)
-                    VALUES (?,?,?,?,?,?,?)""",
-                    (row["data_desp"], f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", "Saída", pago,
-                     row["pagamento"], "despesa", origem_id))
-            saldo = total-pago
-            if saldo > 0:
-                if conta:
-                    conn.execute("""UPDATE contas_pagar SET fornecedor='', descricao=?, valor=?, vencimento=?, valor_pago=?, status=? WHERE id=?""",
-                                 (f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", total,
-                                  row["vencimento"] or row["data_desp"], pago, _status_por_saldo(total,pago), conta["id"]))
-                else:
-                    conn.execute("""INSERT INTO contas_pagar
-                        (fornecedor,descricao,valor,valor_pago,vencimento,status,origem_tipo,origem_id)
-                        VALUES ('',?,?,?,?,?,?,?)""",
-                        (f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", total, pago,
-                         row["vencimento"] or row["data_desp"], _status_por_saldo(total,pago), "despesa", origem_id))
-            elif conta:
-                conn.execute("UPDATE contas_pagar SET descricao=?, valor=?, vencimento=?, valor_pago=?, status='Pago' WHERE id=?",
-                             (f"Despesa #{origem_id}: {row['categoria']} - {row['descricao']}", total,
-                              row["vencimento"] or row["data_desp"], pago, conta["id"]))
-    conn.commit()
-    conn.close()
-
-
-def excluir_origem_integrada(origem_tipo, origem_id, tabela):
-    conn = get_conn()
-    conn.execute("DELETE FROM financeiro WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
-    conn.execute("DELETE FROM contas_pagar WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
-    conn.execute("DELETE FROM contas_receber WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
-    conn.execute("DELETE FROM movimentos_estoque WHERE origem_tipo=? AND origem_id=?", (origem_tipo, origem_id))
-    conn.execute(f"DELETE FROM {tabela} WHERE id=?", (origem_id,))
-    conn.commit()
-    conn.close()
-
-
-def editar_registro_simples(tabela, titulo, label_id, campos, order_by="id DESC"):
-    df = df_query(f"SELECT * FROM {tabela} ORDER BY {order_by}")
-    if df.empty:
-        return
-    st.markdown("---")
-    st.subheader(f"✏️ Editar ou excluir — {titulo}")
-    opcoes = {f"#{int(r['id'])} - {r.get(label_id, '')}": int(r["id"]) for _, r in df.iterrows()}
-    escolha = st.selectbox("Selecione o registro", list(opcoes), key=f"edit_sel_{tabela}")
-    rid = opcoes[escolha]
-    row = df[df["id"] == rid].iloc[0]
-    valores = {}
-    with st.form(f"edit_form_{tabela}"):
-        cols = st.columns(2)
-        for i, (col, rotulo, tipo, opcoes_campo) in enumerate(campos):
-            atual = row[col]
-            box = cols[i % 2]
-            if tipo == "float":
-                valores[col] = box.number_input(rotulo, min_value=0.0, value=float(atual or 0), step=0.01)
-            elif tipo == "date":
-                valores[col] = box.date_input(rotulo, value=_parse_date_text(atual))
-            elif tipo == "select":
-                lista = opcoes_campo or []
-                atual_s = str(atual or "")
-                idx = lista.index(atual_s) if atual_s in lista else 0
-                valores[col] = box.selectbox(rotulo, lista, index=idx)
-            else:
-                valores[col] = box.text_input(rotulo, value="" if pd.isna(atual) else str(atual))
-        c1, c2 = st.columns(2)
-        salvar = c1.form_submit_button("💾 Salvar alteração")
-        excluir = c2.form_submit_button("🗑️ Excluir registro")
-    if salvar:
-        sets=[]; params=[]
-        for col, _, tipo, _ in campos:
-            v=valores[col]
-            if tipo == "date": v=v.strftime("%Y-%m-%d")
-            sets.append(f"{col}=?"); params.append(v)
-        params.append(rid)
-        conn=get_conn(); conn.execute(f"UPDATE {tabela} SET {', '.join(sets)} WHERE id=?", params); conn.commit(); conn.close()
-        st.success("Alteração salva com sucesso.")
-        st.rerun()
-    if excluir:
-        conn=get_conn(); conn.execute(f"DELETE FROM {tabela} WHERE id=?", (rid,)); conn.commit(); conn.close()
-        st.success("Registro excluído.")
-        st.rerun()
-
-
-
-def _salvar_grid_dataframe(tabela, original, editado, campos, titulo):
-    """Salva alterações feitas diretamente no grid (st.data_editor)."""
-    if editado is None or editado.empty:
-        return 0
-    orig = original.set_index("id", drop=False)
-    alterados = 0
-    conn = get_conn()
-    try:
-        for _, row in editado.iterrows():
-            rid = int(row["id"])
-            if rid not in orig.index:
-                continue
-            antigo = orig.loc[rid]
-            mudou = any(str(row.get(c, "")) != str(antigo.get(c, "")) for c in campos)
-            if not mudou:
-                continue
-            sets=[]; params=[]
-            for c in campos:
-                v=row.get(c)
-                if pd.isna(v):
-                    v=""
-                if c in ("valor","valor_pago","valor_recebido","qtd","qtd_kg","preco_kg","desconto","taxa_entrega","estoque_minimo","preco_venda"):
-                    v=float(v or 0)
-                sets.append(f"{c}=?")
-                params.append(v)
-            params.append(rid)
-            conn.execute(f"UPDATE {tabela} SET {', '.join(sets)} WHERE id=?", params)
-            alterados += 1
-        conn.commit()
-    finally:
-        conn.close()
-    return alterados
-
-
-def _grid_simples(tabela, titulo, colunas_editaveis, colunas_disabled=None, altura=420):
-    """Tabela editável e formulário de segurança para correção de registros."""
-    df=df_query(f"SELECT * FROM {tabela} ORDER BY id DESC")
-    if df.empty:
-        st.info(f"Nenhum registro em {titulo.lower()}."); return
-    colunas_editaveis=[c for c in colunas_editaveis if c in df.columns]
-    colunas_disabled=[c for c in (colunas_disabled or []) if c in df.columns]
-    st.markdown(f"### ✏️ {titulo} — PLANILHA EDITÁVEL")
-    st.info("Clique na célula, apague o valor antigo, digite o novo valor e clique em **💾 SALVAR ALTERAÇÕES**.")
-    editado=st.data_editor(df,key=f"editor_{tabela}",use_container_width=True,hide_index=True,num_rows="fixed",disabled=colunas_disabled,height=altura)
-    if st.button("💾 SALVAR ALTERAÇÕES",key=f"save_editor_{tabela}",type="primary"):
-        n=_salvar_grid_dataframe(tabela,df,editado,colunas_editaveis,titulo)
-        if n:
-            st.success(f"{n} registro(s) alterado(s) com sucesso."); st.rerun()
-        else: st.warning("Nenhuma alteração foi detectada no grid.")
-    st.markdown("#### 🛠️ Correção individual")
-    opcoes={f"#{int(r['id'])} — {str(r.get(colunas_editaveis[0],''))}":int(r['id']) for _,r in df.iterrows()}
-    escolha=st.selectbox("Registro para corrigir",list(opcoes),key=f"fallback_sel_{tabela}")
-    rid=opcoes[escolha]; atual=df[df.id==rid].iloc[0]
-    valores={}
-    with st.form(f"fallback_form_{tabela}"):
-        cols=st.columns(2)
-        for i,campo in enumerate(colunas_editaveis):
-            v=atual[campo]; label=campo.replace('_',' ').title(); box=cols[i%2]
-            if campo in ("qtd","qtd_kg","preco_kg","preco_venda","estoque_minimo","valor","desconto","taxa_entrega"):
-                valores[campo]=box.number_input(label,value=float(v or 0),step=0.01)
-            else:
-                valores[campo]=box.text_input(label,value="" if pd.isna(v) else str(v))
-        salvar=st.form_submit_button("💾 Salvar correção")
-    if salvar:
-        sets=[]; params=[]
-        for campo in colunas_editaveis:
-            v=valores[campo]
-            if campo in ("qtd","qtd_kg","preco_kg","preco_venda","estoque_minimo","valor","desconto","taxa_entrega"): v=float(v or 0)
-            sets.append(f"{campo}=?"); params.append(v)
-        params.append(rid); conn=get_conn()
-        try: conn.execute(f"UPDATE {tabela} SET {', '.join(sets)} WHERE id=?",params); conn.commit()
-        finally: conn.close()
-        st.success("Correção salva."); st.rerun()
-
-def _grid_contas(tabela, titulo, pessoa_col, valor_pago_col):
-    df=df_query(f"""SELECT id,{pessoa_col},descricao,valor,COALESCE({valor_pago_col},0) AS {valor_pago_col},MAX(valor-COALESCE({valor_pago_col},0),0) AS saldo,vencimento,status,origem_tipo,origem_id FROM {tabela} ORDER BY date(vencimento),id DESC""")
-    if df.empty: st.info(f"Nenhuma {titulo.lower()} cadastrada."); return
-    editaveis=[pessoa_col,"descricao","valor","vencimento"]
-    st.markdown(f"### ✏️ {titulo} — PLANILHA EDITÁVEL")
-    st.info("Esta é a planilha de edição. Clique na célula, apague o valor antigo, digite o novo e clique em **💾 SALVAR ALTERAÇÕES**.")
-    editado=st.data_editor(df,key=f"editor_{tabela}_contas",use_container_width=True,hide_index=True,num_rows="fixed",disabled=["id",valor_pago_col,"saldo","status","origem_tipo","origem_id"],height=430)
-    if st.button("💾 SALVAR ALTERAÇÕES",key=f"save_editor_{tabela}_contas",type="primary"):
-        orig=df.set_index('id',drop=False); alterados=0; erro=None; conn=get_conn()
-        try:
-            for _,row in editado.iterrows():
-                rid=int(row.id); old=orig.loc[rid]
-                if not any(str(row.get(c,''))!=str(old.get(c,'')) for c in editaveis): continue
-                pessoa='' if pd.isna(row[pessoa_col]) else str(row[pessoa_col]); desc='' if pd.isna(row.descricao) else str(row.descricao); valor=float(row.valor or 0); venc='' if pd.isna(row.vencimento) else str(row.vencimento)
-                if valor<=0: erro=f"Conta #{rid}: o valor precisa ser maior que zero."; break
-                if tabela=='contas_pagar': conn.execute("UPDATE contas_pagar SET fornecedor=?,descricao=?,valor=?,vencimento=? WHERE id=?",(pessoa,desc,valor,venc,rid))
-                else: conn.execute("UPDATE contas_receber SET cliente=?,descricao=?,valor=?,vencimento=? WHERE id=?",(pessoa,desc,valor,venc,rid))
-                alterados+=1
-            if erro: conn.rollback()
-            else: conn.commit()
-        except Exception as exc: conn.rollback(); erro=str(exc)
-        finally: conn.close()
-        if erro: st.error(f"Não foi possível salvar: {erro}")
-        elif alterados:
-            for _,row in editado.iterrows():
-                rid=int(row.id); old=orig.loc[rid]
-                if any(str(row.get(c,''))!=str(old.get(c,'')) for c in editaveis):
-                    origem=str(old.origem_tipo or ''); oid=old.origem_id
-                    if origem in ('compra','venda','despesa') and pd.notna(oid) and oid: sincronizar_origem_financeira(origem,int(oid))
-            st.success(f"{alterados} conta(s) alterada(s) com sucesso."); st.rerun()
-        else: st.warning("Nenhuma alteração foi detectada.")
-    st.markdown("#### 🛠️ Correção individual")
-    op={f"#{int(r.id)} — {str(r[pessoa_col])} — {str(r.descricao)}":int(r.id) for _,r in df.iterrows()}; escolha=st.selectbox("Selecione a conta",list(op),key=f"fallback_conta_{tabela}"); rid=op[escolha]; row=df[df.id==rid].iloc[0]
-    with st.form(f"fallback_form_conta_{tabela}"):
-        pessoa=st.text_input("Pessoa/Empresa",value='' if pd.isna(row[pessoa_col]) else str(row[pessoa_col])); descricao=st.text_input("Descrição",value='' if pd.isna(row.descricao) else str(row.descricao)); valor=st.number_input("Valor",min_value=0.0,value=float(row.valor or 0),step=0.01); vencimento=st.text_input("Vencimento (AAAA-MM-DD)",value='' if pd.isna(row.vencimento) else str(row.vencimento)); salvar=st.form_submit_button("💾 Salvar correção da conta")
-    if salvar:
-        conn=get_conn()
-        try:
-            if tabela=='contas_pagar': conn.execute("UPDATE contas_pagar SET fornecedor=?,descricao=?,valor=?,vencimento=? WHERE id=?",(pessoa,descricao,valor,vencimento,rid))
-            else: conn.execute("UPDATE contas_receber SET cliente=?,descricao=?,valor=?,vencimento=? WHERE id=?",(pessoa,descricao,valor,vencimento,rid))
-            conn.commit()
-        finally: conn.close()
-        origem=str(row.origem_tipo or '')
-        oid=row.origem_id
-        if origem in ('compra','venda','despesa') and oid:
-            oid=int(oid); conn=get_conn()
-            try:
-                if origem=='compra':
-                    comp=conn.execute("SELECT qtd FROM compras WHERE id=?",(oid,)).fetchone()
-                    if comp:
-                        q=float(comp['qtd'] or 0); preco_origem=valor/q if q>0 else 0
-                        conn.execute("UPDATE compras SET fornecedor=?,valor_total=?,preco_kg=?,vencimento=? WHERE id=?",(pessoa,valor,preco_origem,vencimento,oid))
-                elif origem=='despesa':
-                    conn.execute("UPDATE despesas SET valor=?,vencimento=?,descricao=? WHERE id=?",(valor,vencimento,descricao,oid))
-                elif origem=='venda':
-                    venda=conn.execute("SELECT qtd_kg,preco_kg FROM vendas WHERE id=?",(oid,)).fetchone()
-                    if venda:
-                        bruto=float(venda['qtd_kg'] or 0)*float(venda['preco_kg'] or 0); desconto=max(0.0,bruto-valor)
-                        conn.execute("UPDATE vendas SET cliente=?,valor_total=?,desconto=?,vencimento=? WHERE id=?",(pessoa,valor,desconto,vencimento,oid))
-                conn.commit()
-            finally: conn.close()
-            sincronizar_origem_financeira(origem,oid)
-        st.success('Correção salva com sucesso.'); st.rerun()
-
-def _grid_vendas():
-    df=df_query("SELECT id,pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes FROM vendas ORDER BY id DESC")
-    if df.empty:
-        return
-    st.markdown("### ✏️ Vendas — edição direta no grid")
-    st.caption("Edite a célula diretamente. Ao salvar, o valor da venda, estoque, contas a receber e caixa são recalculados.")
-    editado=st.data_editor(df,key="grid_vendas",use_container_width=True,hide_index=True,num_rows="fixed",disabled=["id","valor_total","status_pagamento"],height=500)
-    if st.button("💾 Salvar alterações das vendas",key="save_grid_vendas"):
-        orig=df.set_index("id",drop=False); alterados=0; erro=None
-        for _,row in editado.iterrows():
-            rid=int(row["id"]); old=orig.loc[rid]
-            campos=["pedido","cliente","produto","qtd_kg","preco_kg","desconto","data_venda","forma_pagamento","valor_recebido","vencimento","observacoes"]
-            if not any(str(row[c])!=str(old[c]) for c in campos): continue
-            qtd=float(row["qtd_kg"] or 0); preco=float(row["preco_kg"] or 0); desconto=float(row["desconto"] or 0)
-            if qtd<=0 or preco<0:
-                erro=f"Venda #{rid}: quantidade/preço inválidos."; break
-            produto=str(row["produto"] or "")
-            disponivel=estoque_produto(produto)
-            old_prod=str(old["produto"] or ""); old_q=float(old["qtd_kg"] or 0)
-            if produto==old_prod: disponivel += old_q
-            if disponivel < qtd:
-                erro=f"Venda #{rid}: estoque insuficiente para {produto}. Disponível para essa alteração: {disponivel:.2f}."; break
-            total=max(0.0,qtd*preco-desconto); recebido=min(max(float(row["valor_recebido"] or 0),0),total); status=_status_por_saldo(total,recebido)
-            conn=get_conn()
-            try:
-                conn.execute("UPDATE vendas SET pedido=?,cliente=?,produto=?,qtd_kg=?,preco_kg=?,desconto=?,valor_total=?,data_venda=?,forma_pagamento=?,status_pagamento=?,valor_recebido=?,vencimento=?,observacoes=? WHERE id=?",
-                    (str(row["pedido"] or ""),str(row["cliente"] or ""),produto,qtd,preco,desconto,total,str(row["data_venda"] or ""),str(row["forma_pagamento"] or ""),status,recebido,str(row["vencimento"] or ""),str(row["observacoes"] or ""),rid))
-                conn.commit()
-            finally: conn.close()
-            sincronizar_origem_financeira("venda",rid); alterados+=1
-        if erro:
-            st.error(erro)
-        elif alterados:
-            st.success(f"{alterados} venda(s) alterada(s) com estoque e financeiro recalculados."); st.rerun()
-        else: st.info("Nenhuma alteração foi detectada.")
-    _fallback_venda(df)
-
-
-def _fallback_venda(df):
-    st.markdown("#### 🛠️ Correção individual da venda")
-    op={f"#{int(r.id)} — {str(r.pedido)} — {str(r.produto)}":int(r.id) for _,r in df.iterrows()}
-    escolha=st.selectbox("Selecione a venda",list(op),key="fallback_venda_sel")
-    rid=op[escolha]; row=df[df.id==rid].iloc[0]
-    with st.form("fallback_venda_form"):
-        c1,c2=st.columns(2)
-        pedido=c1.text_input("Pedido",value="" if pd.isna(row.pedido) else str(row.pedido))
-        cliente=c2.text_input("Cliente",value="" if pd.isna(row.cliente) else str(row.cliente))
-        produto=st.text_input("Produto",value="" if pd.isna(row.produto) else str(row.produto))
-        c3,c4,c5=st.columns(3)
-        qtd=c3.number_input("Quantidade",min_value=0.0,value=float(row.qtd_kg or 0),step=0.01)
-        preco=c4.number_input("Preço",min_value=0.0,value=float(row.preco_kg or 0),step=0.01)
-        desconto=c5.number_input("Desconto",min_value=0.0,value=float(row.desconto or 0),step=0.01)
-        data_venda=st.text_input("Data da venda (AAAA-MM-DD)",value="" if pd.isna(row.data_venda) else str(row.data_venda))
-        forma=st.text_input("Forma de pagamento",value="" if pd.isna(row.forma_pagamento) else str(row.forma_pagamento))
-        recebido=st.number_input("Valor recebido",min_value=0.0,value=float(row.valor_recebido or 0),step=0.01)
-        venc=st.text_input("Vencimento (AAAA-MM-DD)",value="" if pd.isna(row.vencimento) else str(row.vencimento))
-        obs=st.text_area("Observações",value="" if pd.isna(row.observacoes) else str(row.observacoes))
-        salvar=st.form_submit_button("💾 Salvar correção da venda")
-    if salvar:
-        total=max(0.0,qtd*preco-desconto); recebido=min(max(recebido,0),total); status=_status_por_saldo(total,recebido)
-        old_prod=str(row.produto or ""); disponivel=estoque_produto(produto)+(float(row.qtd_kg or 0) if produto==old_prod else 0)
-        if qtd<=0 or preco<0: st.error("Quantidade/preço inválidos."); return
-        if disponivel<qtd: st.error(f"Estoque insuficiente. Disponível para esta alteração: {disponivel:.2f}."); return
-        conn=get_conn()
-        try:
-            conn.execute("UPDATE vendas SET pedido=?,cliente=?,produto=?,qtd_kg=?,preco_kg=?,desconto=?,valor_total=?,data_venda=?,forma_pagamento=?,status_pagamento=?,valor_recebido=?,vencimento=?,observacoes=? WHERE id=?",(pedido,cliente,produto,qtd,preco,desconto,total,data_venda,forma,status,recebido,venc,obs,rid)); conn.commit()
-        finally: conn.close()
-        sincronizar_origem_financeira('venda',rid); st.success('Venda corrigida e vínculos recalculados.'); st.rerun()
-
-
-def _fallback_compra(df):
-    st.markdown("#### 🛠️ Correção individual da compra")
-    op={f"#{int(r.id)} — {str(r.fornecedor)} — {str(r.produto)}":int(r.id) for _,r in df.iterrows()}
-    escolha=st.selectbox("Selecione a compra",list(op),key="fallback_compra_sel")
-    rid=op[escolha]; row=df[df.id==rid].iloc[0]
-    with st.form("fallback_compra_form"):
-        fornecedor=st.text_input("Fornecedor",value="" if pd.isna(row.fornecedor) else str(row.fornecedor))
-        produto=st.text_input("Produto",value="" if pd.isna(row.produto) else str(row.produto))
-        c1,c2=st.columns(2)
-        qtd=c1.number_input("Quantidade",min_value=0.0,value=float(row.qtd or 0),step=0.01)
-        preco=c2.number_input("Preço",min_value=0.0,value=float(row.preco_kg or 0),step=0.01)
-        data_compra=st.text_input("Data da compra (AAAA-MM-DD)",value="" if pd.isna(row.data_compra) else str(row.data_compra))
-        lote=st.text_input("Lote",value="" if pd.isna(row.lote) else str(row.lote)); validade=st.text_input("Validade (AAAA-MM-DD)",value="" if pd.isna(row.validade) else str(row.validade))
-        forma=st.text_input("Forma de pagamento",value="" if pd.isna(row.forma_pagamento) else str(row.forma_pagamento)); venc=st.text_input("Vencimento (AAAA-MM-DD)",value="" if pd.isna(row.vencimento) else str(row.vencimento)); obs=st.text_area("Observações",value="" if pd.isna(row.observacoes) else str(row.observacoes))
-        salvar=st.form_submit_button("💾 Salvar correção da compra")
-    if salvar:
-        if qtd<=0 or preco<0: st.error('Quantidade/preço inválidos.'); return
-        total=qtd*preco; conn=get_conn()
-        try:
-            conn.execute("UPDATE compras SET fornecedor=?,produto=?,qtd=?,preco_kg=?,valor_total=?,data_compra=?,lote=?,validade=?,forma_pagamento=?,vencimento=?,observacoes=? WHERE id=?",(fornecedor,produto,qtd,preco,total,data_compra,lote,validade,forma,venc,obs,rid)); conn.commit()
-        finally: conn.close()
-        sincronizar_origem_financeira('compra',rid); st.success('Compra corrigida e vínculos recalculados.'); st.rerun()
-
-def _grid_compras():
-    df=df_query("SELECT id,fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,forma_pagamento,status_pagamento,vencimento,observacoes FROM compras ORDER BY id DESC")
-    if df.empty: return
-    st.markdown("### ✏️ Compras — edição direta no grid")
-    st.caption("Edite a célula diretamente. Ao salvar, estoque, contas a pagar e caixa são recalculados.")
-    editado=st.data_editor(df,key="grid_compras",use_container_width=True,hide_index=True,num_rows="fixed",disabled=["id","valor_total","status_pagamento"],height=500)
-    if st.button("💾 Salvar alterações das compras",key="save_grid_compras"):
-        orig=df.set_index("id",drop=False); alterados=0
-        for _,row in editado.iterrows():
-            rid=int(row["id"]); old=orig.loc[rid]
-            campos=["fornecedor","produto","qtd","preco_kg","data_compra","lote","validade","forma_pagamento","vencimento","observacoes"]
-            if not any(str(row[c])!=str(old[c]) for c in campos): continue
-            qtd=float(row["qtd"] or 0); preco=float(row["preco_kg"] or 0)
-            if qtd<=0 or preco<0:
-                st.error(f"Compra #{rid}: quantidade/preço inválidos."); continue
-            total=qtd*preco
-            conn=get_conn()
-            try:
-                conn.execute("UPDATE compras SET fornecedor=?,produto=?,qtd=?,preco_kg=?,valor_total=?,data_compra=?,lote=?,validade=?,forma_pagamento=?,vencimento=?,observacoes=? WHERE id=?",
-                    (str(row["fornecedor"] or ""),str(row["produto"] or ""),qtd,preco,total,str(row["data_compra"] or ""),str(row["lote"] or ""),str(row["validade"] or ""),str(row["forma_pagamento"] or ""),str(row["vencimento"] or ""),str(row["observacoes"] or ""),rid)); conn.commit()
-            finally: conn.close()
-            sincronizar_origem_financeira("compra",rid); alterados+=1
-        if alterados: st.success(f"{alterados} compra(s) alterada(s) com estoque e financeiro recalculados."); st.rerun()
-        else: st.info("Nenhuma alteração foi detectada.")
-    _fallback_compra(df)
-
-
 def pagina_clientes():
     st.title("👥 Clientes")
     with st.form("novo_cliente"):
-        c1,c2,c3=st.columns(3)
-        nome=c1.text_input("Nome *"); telefone=c2.text_input("Telefone"); cidade=c3.text_input("Cidade")
-        endereco=st.text_input("Endereço")
-        salvar=st.form_submit_button("Cadastrar cliente")
+        c1, c2, c3 = st.columns(3)
+        nome = c1.text_input("Nome *")
+        telefone = c2.text_input("Telefone")
+        cidade = c3.text_input("Cidade")
+        endereco = st.text_input("Endereço")
+        salvar = st.form_submit_button("Cadastrar cliente")
         if salvar:
-            if not nome.strip(): st.error("Informe o nome.")
+            if not nome.strip():
+                st.error("Informe o nome.")
             else:
-                conn=get_conn()
-                try:
-                    existe=conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)",(nome.strip(),)).fetchone()
-                    if existe: st.warning("Esse cliente já está cadastrado.")
-                    else:
-                        conn.execute("INSERT INTO clientes (nome,telefone,cidade,endereco,data_cad) VALUES (?,?,?,?,?)",(nome.strip(),telefone,cidade,endereco,hoje())); conn.commit(); st.success("Cliente cadastrado."); st.rerun()
-                finally: conn.close()
-    _grid_simples("clientes","Clientes",["nome","telefone","cidade","endereco"],["id","data_cad"])
+                conn = get_conn()
+                existe = conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)", (nome.strip(),)).fetchone()
+                if existe:
+                    conn.close()
+                    st.warning("Esse cliente já está cadastrado.")
+                else:
+                    conn.execute(
+                        "INSERT INTO clientes (nome,telefone,cidade,endereco,data_cad) VALUES (?,?,?,?,?)",
+                        (nome.strip(), telefone, cidade, endereco, hoje())
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Cliente cadastrado.")
+                    st.rerun()
+    renderizar_tabela_simples("clientes", "Clientes cadastrados")
+
 
 def pagina_fornecedores():
     st.title("🚚 Fornecedores")
     with st.form("novo_fornecedor"):
-        c1,c2,c3=st.columns(3)
-        nome=c1.text_input("Fornecedor *"); contato=c2.text_input("Contato"); telefone=c3.text_input("Telefone")
-        endereco=st.text_input("Endereço"); produto_fornecido=st.text_input("Produtos fornecidos"); prazo=st.text_input("Prazo de pagamento"); obs=st.text_area("Observações")
-        salvar=st.form_submit_button("Cadastrar fornecedor")
+        c1, c2, c3 = st.columns(3)
+        nome = c1.text_input("Fornecedor *")
+        contato = c2.text_input("Contato")
+        telefone = c3.text_input("Telefone")
+        endereco = st.text_input("Endereço")
+        produto_fornecido = st.text_input("Produtos fornecidos")
+        prazo = st.text_input("Prazo de pagamento")
+        obs = st.text_area("Observações")
+        salvar = st.form_submit_button("Cadastrar fornecedor")
         if salvar:
-            if not nome.strip(): st.error("Informe o fornecedor.")
+            if not nome.strip():
+                st.error("Informe o fornecedor.")
             else:
-                conn=get_conn(); conn.execute("INSERT INTO fornecedores (fornecedor,contato,telefone,endereco,produto_fornecido,prazo_pagamento,observacoes) VALUES (?,?,?,?,?,?,?)",(nome,contato,telefone,endereco,produto_fornecido,prazo,obs)); conn.commit(); conn.close(); st.success("Fornecedor cadastrado."); st.rerun()
-    _grid_simples("fornecedores","Fornecedores",["fornecedor","contato","telefone","endereco","produto_fornecido","prazo_pagamento","observacoes"],["id"])
+                conn = get_conn()
+                conn.execute("""
+                    INSERT INTO fornecedores
+                    (fornecedor,contato,telefone,endereco,produto_fornecido,prazo_pagamento,observacoes)
+                    VALUES (?,?,?,?,?,?,?)
+                """, (nome, contato, telefone, endereco, produto_fornecido, prazo, obs))
+                conn.commit()
+                conn.close()
+                st.success("Fornecedor cadastrado.")
+                st.rerun()
+    renderizar_tabela_simples("fornecedores", "Fornecedores cadastrados")
+
 
 def pagina_produtos():
     st.title("🐟 Cadastro Mestre de Produtos")
     with st.form("novo_produto"):
-        c1,c2,c3,c4=st.columns(4)
-        nome=c1.text_input("Produto *"); categoria=c2.selectbox("Categoria",CATEGORIAS_PRODUTO); unidade=c3.selectbox("Unidade",["kg","un","g","pacote","caixa"]); estoque_min=c4.number_input("Estoque mínimo",min_value=0.0,step=0.1)
-        preco=st.number_input("Preço de venda padrão",min_value=0.0,step=0.01); salvar=st.form_submit_button("Cadastrar produto")
+        c1, c2, c3, c4 = st.columns(4)
+        nome = c1.text_input("Produto *")
+        categoria = c2.selectbox("Categoria", CATEGORIAS_PRODUTO)
+        unidade = c3.selectbox("Unidade", ["kg", "un", "g", "pacote", "caixa"])
+        estoque_min = c4.number_input("Estoque mínimo", min_value=0.0, step=0.1)
+        preco = st.number_input("Preço de venda padrão", min_value=0.0, step=0.01)
+        salvar = st.form_submit_button("Cadastrar produto")
         if salvar:
-            if not nome.strip(): st.error("Informe o produto.")
+            if not nome.strip():
+                st.error("Informe o produto.")
             else:
-                conn=get_conn()
+                conn = get_conn()
                 try:
-                    conn.execute("INSERT INTO produtos (nome,categoria,unidade,preco_venda,estoque_minimo) VALUES (?,?,?,?,?)",(nome.strip(),categoria,unidade,preco,estoque_min)); conn.commit(); st.success("Produto cadastrado."); st.rerun()
-                except sqlite3.IntegrityError: st.error("Esse produto já existe.")
-                finally: conn.close()
-    _grid_simples("produtos","Produtos",["nome","categoria","unidade","preco_venda","estoque_minimo"],["id","custo_medio","ativo"])
+                    conn.execute("""
+                        INSERT INTO produtos
+                        (nome,categoria,unidade,preco_venda,estoque_minimo)
+                        VALUES (?,?,?,?,?)
+                    """, (nome.strip(), categoria, unidade, preco, estoque_min))
+                    conn.commit()
+                    st.success("Produto cadastrado.")
+                    st.rerun()
+                except sqlite3.IntegrityError:
+                    st.error("Esse produto já existe.")
+                finally:
+                    conn.close()
+
+    df = get_produtos()
+    if not df.empty:
+        df["estoque_atual"] = df["nome"].apply(estoque_produto)
+        df["alerta"] = df.apply(
+            lambda r: "⚠️ BAIXO" if r["estoque_atual"] <= r["estoque_minimo"] else "OK", axis=1
+        )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 def pagina_compras():
     st.title("📥 Compras")
-    produtos=get_produtos(); fornecedores=df_query("SELECT fornecedor FROM fornecedores ORDER BY fornecedor"); lp=produtos["nome"].tolist() if not produtos.empty else []; lf=fornecedores["fornecedor"].tolist() if not fornecedores.empty else []
+    produtos = get_produtos()
+    fornecedores = df_query("SELECT fornecedor FROM fornecedores ORDER BY fornecedor")
+    lista_produtos = produtos["nome"].tolist() if not produtos.empty else []
+    lista_fornecedores = fornecedores["fornecedor"].tolist() if not fornecedores.empty else []
+
     with st.form("nova_compra"):
-        c1,c2,c3=st.columns(3); fornecedor=c1.selectbox("Fornecedor",[""]+lf); produto=c2.selectbox("Produto *",lp if lp else ["Cadastre produtos primeiro"]); qtd=c3.number_input("Quantidade",min_value=0.0,step=0.1); preco=st.number_input("Preço por kg/unidade",min_value=0.0,step=0.01)
-        st.info(f"Valor total: {moeda(qtd*preco)}")
-        c4,c5,c6=st.columns(3); dc=c4.date_input("Data",value=date.today()); lote=c5.text_input("Lote"); validade=c6.date_input("Validade",value=date.today())
-        c7,c8,c9=st.columns(3); forma=c7.selectbox("Forma de pagamento",FORMAS_PAGAMENTO,index=5); status=c8.selectbox("Status",STATUS_PAGAMENTO,index=0 if forma!="A prazo" else 1); venc=c9.date_input("Vencimento",value=date.today()); obs=st.text_area("Observações")
-        salvar=st.form_submit_button("Registrar compra")
+        c1, c2, c3 = st.columns(3)
+        fornecedor = c1.selectbox("Fornecedor", [""] + lista_fornecedores)
+        produto = c2.selectbox("Produto *", lista_produtos if lista_produtos else ["Cadastre produtos primeiro"])
+        qtd = c3.number_input("Quantidade", min_value=0.0, step=0.1)
+        preco = st.number_input("Preço por kg/unidade", min_value=0.0, step=0.01)
+        total_preview = qtd * preco
+        st.info(f"Valor total: {moeda(total_preview)}")
+
+        c4, c5, c6 = st.columns(3)
+        data_compra = c4.date_input("Data", value=date.today())
+        lote = c5.text_input("Lote")
+        validade = c6.date_input("Validade", value=date.today())
+        c7, c8, c9 = st.columns(3)
+        forma = c7.selectbox("Forma de pagamento", FORMAS_PAGAMENTO, index=5)
+        status = c8.selectbox("Status", STATUS_PAGAMENTO, index=0 if forma != "A prazo" else 1)
+        venc = c9.date_input("Vencimento", value=date.today())
+
+        obs = st.text_area("Observações")
+        salvar = st.form_submit_button("Registrar compra")
+
         if salvar:
-            if not lp: st.error("Cadastre produtos antes de registrar compras.")
-            elif qtd<=0 or preco<=0: st.error("Informe quantidade e preço maiores que zero.")
-            else: registrar_compra(fornecedor,produto,qtd,preco,dc.strftime("%Y-%m-%d"),lote,validade.strftime("%Y-%m-%d"),forma,status,venc.strftime("%Y-%m-%d"),obs); st.success("Compra registrada e estoque atualizado."); st.rerun()
-    _grid_compras()
+            if not lista_produtos:
+                st.error("Cadastre produtos antes de registrar compras.")
+            elif qtd <= 0 or preco <= 0:
+                st.error("Informe quantidade e preço maiores que zero.")
+            else:
+                registrar_compra(
+                    fornecedor, produto, qtd, preco, data_compra.strftime("%Y-%m-%d"),
+                    lote, validade.strftime("%Y-%m-%d"), forma, status,
+                    venc.strftime("%Y-%m-%d"), obs
+                )
+                st.success("Compra registrada e estoque atualizado.")
+                st.rerun()
+
+    renderizar_tabela_simples("compras", "Histórico de compras")
+
 
 def pagina_vendas():
     st.title("🧾 Vendas e Pagamentos")
-    produtos=get_produtos(); clientes=df_query("SELECT nome FROM clientes ORDER BY nome"); lp=produtos["nome"].tolist() if not produtos.empty else []; lc=clientes["nome"].tolist() if not clientes.empty else []
+    produtos = get_produtos()
+    clientes = df_query("SELECT nome FROM clientes ORDER BY nome")
+    lista_produtos = produtos["nome"].tolist() if not produtos.empty else []
+    lista_clientes = clientes["nome"].tolist() if not clientes.empty else []
+
     with st.form("nova_venda"):
-        pedido=st.text_input("Número do pedido",value=proximo_pedido()); c1,c2,c3=st.columns(3); cliente=c1.selectbox("Cliente",[""]+lc); produto=c2.selectbox("Produto *",lp if lp else ["Cadastre produtos primeiro"]); qtd=c3.number_input("Quantidade (kg/un)",min_value=0.0,step=0.1)
-        preco_padrao=float(produtos[produtos["nome"]==produto].iloc[0]["preco_venda"] or 0) if produto in lp else 0.0
-        c4,c5,c6=st.columns(3); preco=c4.number_input("Preço por kg/unidade",min_value=0.0,value=preco_padrao,step=0.01); desconto=c5.number_input("Desconto",min_value=0.0,step=0.01); dv=c6.date_input("Data",value=date.today()); total=max(0.0,qtd*preco-desconto); st.metric("Total da venda",moeda(total))
-        c7,c8,c9=st.columns(3); forma=c7.selectbox("Forma de pagamento",FORMAS_PAGAMENTO); status=c8.selectbox("Status",STATUS_PAGAMENTO); recebido=c9.number_input("Valor recebido",min_value=0.0,max_value=max(total,0.0),step=0.01); venc=st.date_input("Vencimento",value=date.today()); obs=st.text_area("Observações"); salvar=st.form_submit_button("Registrar venda")
+        pedido = st.text_input("Número do pedido", value=proximo_pedido())
+        c1, c2, c3 = st.columns(3)
+        cliente = c1.selectbox("Cliente", [""] + lista_clientes)
+        produto = c2.selectbox("Produto *", lista_produtos if lista_produtos else ["Cadastre produtos primeiro"])
+        qtd = c3.number_input("Quantidade (kg/un)", min_value=0.0, step=0.1)
+
+        preco_padrao = 0.0
+        if produto in lista_produtos:
+            row = produtos[produtos["nome"] == produto].iloc[0]
+            preco_padrao = float(row["preco_venda"] or 0)
+
+        c4, c5, c6 = st.columns(3)
+        preco = c4.number_input("Preço por kg/unidade", min_value=0.0, value=preco_padrao, step=0.01)
+        desconto = c5.number_input("Desconto", min_value=0.0, step=0.01)
+        data_venda = c6.date_input("Data", value=date.today())
+
+        bruto = qtd * preco
+        total = max(0.0, bruto - desconto)
+        st.metric("Total da venda", moeda(total))
+
+        c7, c8, c9 = st.columns(3)
+        forma = c7.selectbox("Forma de pagamento", FORMAS_PAGAMENTO)
+        status = c8.selectbox("Status", STATUS_PAGAMENTO)
+        recebido = c9.number_input("Valor recebido", min_value=0.0, max_value=max(total, 0.0), step=0.01)
+
+        venc = st.date_input("Vencimento", value=date.today())
+        obs = st.text_area("Observações")
+
+        salvar = st.form_submit_button("Registrar venda")
+
         if salvar:
-            if not lp: st.error("Cadastre produtos antes de vender.")
-            elif qtd<=0 or preco<=0: st.error("Informe quantidade e preço maiores que zero.")
-            elif estoque_produto(produto)<qtd: st.error(f"Estoque insuficiente. Estoque atual de {produto}: {estoque_produto(produto):.2f}")
-            else: registrar_venda(pedido,cliente,produto,qtd,preco,desconto,dv.strftime("%Y-%m-%d"),forma,status,recebido,venc.strftime("%Y-%m-%d"),obs); st.success(f"Venda {pedido} registrada."); st.rerun()
-    _grid_vendas()
+            if not lista_produtos:
+                st.error("Cadastre produtos antes de vender.")
+            elif qtd <= 0 or preco <= 0:
+                st.error("Informe quantidade e preço maiores que zero.")
+            elif estoque_produto(produto) < qtd:
+                st.error(
+                    f"Estoque insuficiente. Estoque atual de {produto}: "
+                    f"{estoque_produto(produto):.2f}"
+                )
+            else:
+                registrar_venda(
+                    pedido, cliente, produto, qtd, preco, desconto,
+                    data_venda.strftime("%Y-%m-%d"), forma, status, recebido,
+                    venc.strftime("%Y-%m-%d"), obs
+                )
+                st.success(f"Venda {pedido} registrada.")
+                st.rerun()
+
+    renderizar_tabela_simples("vendas", "Histórico de vendas")
+
 
 def pagina_estoque():
     st.title("📦 Estoque")
@@ -1266,11 +835,20 @@ def pagina_estoque():
         st.info("Cadastre produtos primeiro.")
         return
 
-    st.subheader("🔗 Estoque integrado: Compras − Vendas + Ajustes")
-    df = resumo_estoque()
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    registros = []
+    for _, r in produtos.iterrows():
+        est = estoque_produto(r["nome"])
+        registros.append({
+            "Produto": r["nome"],
+            "Categoria": r["categoria"],
+            "Unidade": r["unidade"],
+            "Estoque atual": est,
+            "Estoque mínimo": float(r["estoque_minimo"] or 0),
+            "Situação": "⚠️ BAIXO" if est <= float(r["estoque_minimo"] or 0) else "OK",
+        })
 
-    st.caption("O estoque atual é calculado diretamente pelas compras registradas menos as vendas registradas, considerando também perdas e ajustes manuais.")
+    df = pd.DataFrame(registros)
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
     st.markdown("---")
     st.subheader("Registrar perda ou ajuste")
@@ -1285,11 +863,12 @@ def pagina_estoque():
                 st.error("Informe uma quantidade.")
             else:
                 registrar_movimento(produto, tipo, qtd, 0, "manual", None, obs)
-                st.success("Movimentação registrada e estoque atualizado.")
+                st.success("Movimentação registrada.")
                 st.rerun()
 
     st.subheader("Histórico de movimentações")
     renderizar_tabela_simples("movimentos_estoque", "Movimentações")
+
 
 def pagina_financeiro():
     st.title("💰 Financeiro Integrado")
@@ -1302,11 +881,11 @@ def pagina_financeiro():
     saldo = entradas - saidas
 
     receber = float(scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_recebido,0) > 0 THEN valor - COALESCE(valor_recebido,0) ELSE 0 END),0)
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_recebido,0),0)),0)
         FROM contas_receber WHERE status IN ('Pendente','Parcial')
     """) or 0)
     pagar = float(scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_pago,0) > 0 THEN valor - COALESCE(valor_pago,0) ELSE 0 END),0)
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_pago,0),0)),0)
         FROM contas_pagar WHERE status IN ('Pendente','Parcial')
     """) or 0)
 
@@ -1415,34 +994,117 @@ def pagina_financeiro():
 
 def pagina_contas_pagar():
     st.title("💸 Contas a Pagar")
-    df=df_query("""SELECT id,fornecedor,descricao,valor,COALESCE(valor_pago,0) AS valor_pago,MAX(valor-COALESCE(valor_pago,0),0) AS saldo,vencimento,status,origem_tipo,origem_id FROM contas_pagar ORDER BY date(vencimento),id DESC""")
-    if df.empty: st.info("Nenhuma conta a pagar."); return
-    pend=df[(df["status"].isin(["Pendente","Parcial"]))&(df["saldo"]>0)]
-    if not pend.empty:
+    df = df_query("""
+        SELECT *, MAX(valor-COALESCE(valor_pago,0),0) AS saldo
+        FROM contas_pagar
+        ORDER BY date(vencimento), id DESC
+    """)
+    if df.empty:
+        st.info("Nenhuma conta a pagar.")
+        return
+
+    df["vencida"] = df.apply(
+        lambda r: "🔴 SIM" if r["status"] in ("Pendente", "Parcial")
+        and r["vencimento"] and r["vencimento"] < hoje() else "", axis=1
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    pendentes = df[(df["status"].isin(["Pendente", "Parcial"])) & (df["saldo"] > 0)]
+    if not pendentes.empty:
         st.subheader("Registrar pagamento")
-        op={f"#{int(r.id)} - {r.fornecedor} - {r.descricao} - Saldo {moeda(r.saldo)}":int(r.id) for _,r in pend.iterrows()}; escolha=st.selectbox("Conta",list(op),key="pagar_conta_sel"); valor_pago=st.number_input("Valor pago",min_value=0.0,step=0.01,key="pagar_valor"); forma=st.selectbox("Forma",FORMAS_PAGAMENTO,key="pagar_forma")
-        if st.button("Confirmar pagamento",key="btn_pagar_novo"):
-            rid=op[escolha]; row=df[df.id==rid].iloc[0]; valor=min(float(valor_pago),float(row.saldo))
-            if valor<=0: st.error("Informe um valor maior que zero.")
+        opcoes = {
+            f"#{int(r['id'])} - {r['fornecedor']} - {r['descricao']} - Saldo {moeda(r['saldo'])}":
+            int(r["id"]) for _, r in pendentes.iterrows()
+        }
+        escolha = st.selectbox("Conta", list(opcoes))
+        valor_pago = st.number_input("Valor pago", min_value=0.0, step=0.01)
+        forma = st.selectbox("Forma", FORMAS_PAGAMENTO, key="forma_pagar")
+
+        if st.button("Confirmar pagamento", key="btn_pagar"):
+            conta_id = opcoes[escolha]
+            row = df[df["id"] == conta_id].iloc[0]
+            saldo_atual = float(row["saldo"])
+            valor = min(float(valor_pago), saldo_atual)
+
+            if valor <= 0:
+                st.error("Informe um valor maior que zero.")
             else:
-                novo=float(row.valor_pago or 0)+valor; status="Pago" if novo>=float(row.valor) else "Parcial"; conn=get_conn(); conn.execute("UPDATE contas_pagar SET valor_pago=?,status=? WHERE id=?",(novo,status,rid)); conn.commit(); conn.close(); registrar_financeiro(hoje(),f"Pagamento conta a pagar #{rid} - {row.descricao}","Saída",valor,forma,"conta_pagar",rid); st.success("Pagamento registrado."); st.rerun()
-    _grid_contas("contas_pagar","Contas a Pagar","fornecedor","valor_pago")
+                novo_pago = float(row["valor_pago"] or 0) + valor
+                novo_status = "Pago" if novo_pago >= float(row["valor"]) else "Parcial"
+
+                conn = get_conn()
+                conn.execute(
+                    "UPDATE contas_pagar SET valor_pago=?, status=? WHERE id=?",
+                    (novo_pago, novo_status, conta_id)
+                )
+                conn.commit()
+                conn.close()
+
+                registrar_financeiro(
+                    hoje(), f"Pagamento conta a pagar #{conta_id} - {row['descricao']}",
+                    "Saída", valor, forma, "conta_pagar", conta_id
+                )
+                st.success(f"Pagamento de {moeda(valor)} registrado no caixa.")
+                st.rerun()
+
 
 
 def pagina_contas_receber():
     st.title("💵 Contas a Receber")
-    df=df_query("""SELECT id,cliente,descricao,valor,COALESCE(valor_recebido,0) AS valor_recebido,MAX(valor-COALESCE(valor_recebido,0),0) AS saldo,vencimento,status,origem_tipo,origem_id FROM contas_receber ORDER BY date(vencimento),id DESC""")
-    if df.empty: st.info("Nenhuma conta a receber."); return
-    pend=df[(df["status"].isin(["Pendente","Parcial"]))&(df["saldo"]>0)]
-    if not pend.empty:
+    df = df_query("""
+        SELECT *, MAX(valor-COALESCE(valor_recebido,0),0) AS saldo
+        FROM contas_receber
+        ORDER BY date(vencimento), id DESC
+    """)
+    if df.empty:
+        st.info("Nenhuma conta a receber.")
+        return
+
+    df["vencida"] = df.apply(
+        lambda r: "🔴 SIM" if r["status"] in ("Pendente", "Parcial")
+        and r["vencimento"] and r["vencimento"] < hoje() else "", axis=1
+    )
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    pendentes = df[(df["status"].isin(["Pendente", "Parcial"])) & (df["saldo"] > 0)]
+    if not pendentes.empty:
         st.subheader("Registrar recebimento")
-        op={f"#{int(r.id)} - {r.cliente} - {r.descricao} - Saldo {moeda(r.saldo)}":int(r.id) for _,r in pend.iterrows()}; escolha=st.selectbox("Conta",list(op),key="receber_conta_sel"); valor_recebido=st.number_input("Valor recebido",min_value=0.0,step=0.01,key="receber_valor"); forma=st.selectbox("Forma",FORMAS_PAGAMENTO,key="receber_forma")
-        if st.button("Confirmar recebimento",key="btn_receber_novo"):
-            rid=op[escolha]; row=df[df.id==rid].iloc[0]; valor=min(float(valor_recebido),float(row.saldo))
-            if valor<=0: st.error("Informe um valor maior que zero.")
+        opcoes = {
+            f"#{int(r['id'])} - {r['cliente']} - {r['descricao']} - Saldo {moeda(r['saldo'])}":
+            int(r["id"]) for _, r in pendentes.iterrows()
+        }
+        escolha = st.selectbox("Conta", list(opcoes))
+        valor_recebido = st.number_input("Valor recebido", min_value=0.0, step=0.01)
+        forma = st.selectbox("Forma", FORMAS_PAGAMENTO, key="forma_receber")
+
+        if st.button("Confirmar recebimento", key="btn_receber"):
+            conta_id = opcoes[escolha]
+            row = df[df["id"] == conta_id].iloc[0]
+            saldo_atual = float(row["saldo"])
+            valor = min(float(valor_recebido), saldo_atual)
+
+            if valor <= 0:
+                st.error("Informe um valor maior que zero.")
             else:
-                novo=float(row.valor_recebido or 0)+valor; status="Pago" if novo>=float(row.valor) else "Parcial"; conn=get_conn(); conn.execute("UPDATE contas_receber SET valor_recebido=?,status=? WHERE id=?",(novo,status,rid)); conn.commit(); conn.close(); registrar_financeiro(hoje(),f"Recebimento conta a receber #{rid} - {row.descricao}","Entrada",valor,forma,"conta_receber",rid); st.success("Recebimento registrado."); st.rerun()
-    _grid_contas("contas_receber","Contas a Receber","cliente","valor_recebido")
+                novo_recebido = float(row["valor_recebido"] or 0) + valor
+                novo_status = "Pago" if novo_recebido >= float(row["valor"]) else "Parcial"
+
+                conn = get_conn()
+                conn.execute(
+                    "UPDATE contas_receber SET valor_recebido=?, status=? WHERE id=?",
+                    (novo_recebido, novo_status, conta_id)
+                )
+                conn.commit()
+                conn.close()
+
+                registrar_financeiro(
+                    hoje(), f"Recebimento conta a receber #{conta_id} - {row['descricao']}",
+                    "Entrada", valor, forma, "conta_receber", conta_id
+                )
+                st.success(f"Recebimento de {moeda(valor)} registrado no caixa.")
+                st.rerun()
+
+
 
 def pagina_despesas():
     st.title("🧾 Despesas Gerais")
@@ -1507,7 +1169,8 @@ def pagina_despesas():
                 st.success("Despesa integrada ao Financeiro.")
                 st.rerun()
 
-    _grid_simples("despesas","Despesas",["data_desp","categoria","descricao","valor","pagamento","status","vencimento"],["id"])
+    renderizar_tabela_simples("despesas", "Despesas")
+
 
 
 def pagina_entregas():
@@ -1551,8 +1214,7 @@ def pagina_entregas():
             st.success("Entrega cadastrada.")
             st.rerun()
 
-    _grid_simples("entregas","Entregas",["pedido","cliente","data_ent","endereco","bairro","cidade","entregador","taxa_entrega","status","observacoes"],["id"])
-    return
+    renderizar_tabela_simples("entregas", "Entregas cadastradas")
 
 
 def pagina_relatorios():
@@ -1706,35 +1368,6 @@ def pagina_importar():
 def pagina_backup():
     st.title("💾 Backup e Segurança")
     st.write("Faça backups frequentes do banco de dados antes de atualizações importantes.")
-    st.info(f"Banco ativo: {DB_FILE}")
-
-    st.subheader("🔐 Restaurar um banco existente")
-    arquivo_db = st.file_uploader("Selecione um backup .db do Kero Fish", type=["db"], key="restaurar_db_upload")
-    if arquivo_db is not None and st.button("♻️ RESTAURAR ESTE BANCO", key="btn_restaurar_db", type="primary"):
-        # Backup do banco atual antes de substituir.
-        backup_atual = backup_db("antes_restauracao")
-        tmp = Path(BACKUP_DIR) / "_restore_temp.db"
-        try:
-            tmp.write_bytes(arquivo_db.getbuffer())
-            if _db_record_count(tmp) <= 0:
-                st.error("O arquivo selecionado não contém registros Kero Fish válidos.")
-            else:
-                # Valida integridade antes de substituir.
-                con=sqlite3.connect(tmp)
-                ok=con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-                con.close()
-                if not ok:
-                    st.error("O banco selecionado está corrompido.")
-                else:
-                    shutil.copy2(tmp, DB_FILE)
-                    st.success("Banco restaurado. O backup anterior foi preservado.")
-                    st.rerun()
-        except Exception as exc:
-            st.error(f"Não foi possível restaurar o banco: {exc}")
-        finally:
-            try: tmp.unlink()
-            except Exception: pass
-
 
     if st.button("Criar backup agora"):
         destino = backup_db()
@@ -1774,11 +1407,11 @@ def painel():
     caixa = entradas - saidas
 
     receber = float(scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_recebido,0) > 0 THEN valor - COALESCE(valor_recebido,0) ELSE 0 END),0)
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_recebido,0),0)),0)
         FROM contas_receber WHERE status IN ('Pendente','Parcial')
     """) or 0)
     pagar = float(scalar("""
-        SELECT COALESCE(SUM(CASE WHEN valor - COALESCE(valor_pago,0) > 0 THEN valor - COALESCE(valor_pago,0) ELSE 0 END),0)
+        SELECT COALESCE(SUM(MAX(valor - COALESCE(valor_pago,0),0)),0)
         FROM contas_pagar WHERE status IN ('Pendente','Parcial')
     """) or 0)
 
@@ -1789,22 +1422,17 @@ def painel():
             for _, r in produtos.iterrows()
         )
 
-    # Resumo financeiro principal: mostra claramente entradas, saídas e saldo atual.
-    st.subheader("💰 Resumo financeiro")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("🟢 Entradas", moeda(entradas))
-    c2.metric("🔴 Saídas", moeda(saidas))
-    c3.metric("💰 Saldo atual", moeda(caixa))
-    c4.metric("🧾 Vendas", moeda(float(vendas["valor_total"].sum()) if not vendas.empty else 0))
-    c5.metric("💵 A receber", moeda(receber))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("💰 Caixa realizado", moeda(caixa))
+    c2.metric("🧾 Vendas", moeda(float(vendas["valor_total"].sum()) if not vendas.empty else 0))
+    c3.metric("💵 A receber", moeda(receber))
+    c4.metric("💸 A pagar", moeda(pagar))
 
-    c6, c7, c8, c9 = st.columns(4)
-    c6.metric("💸 A pagar", moeda(pagar))
-    c7.metric("📦 Produtos", len(produtos))
-    c8.metric("⚠️ Estoque baixo", estoque_baixo)
-    c9.metric("🛒 Quantidade de vendas", len(vendas))
-
-    st.caption(f"Saldo atual = Entradas realizadas ({moeda(entradas)}) − Saídas realizadas ({moeda(saidas)}) = {moeda(caixa)}")
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("📦 Produtos", len(produtos))
+    c6.metric("⚠️ Estoque baixo", estoque_baixo)
+    c7.metric("🛒 Quantidade de vendas", len(vendas))
+    c8.metric("📅 Data", hoje())
 
     st.markdown("---")
 
@@ -1813,14 +1441,17 @@ def painel():
     with col1:
         st.subheader("⚠️ Estoque baixo")
         baixos = []
-        resumo = resumo_estoque()
-        if not resumo.empty:
-            baixos = resumo[resumo["Estoque atual"] <= resumo["Mínimo"]].copy()
-        if not baixos.empty:
-            st.dataframe(
-                baixos[["Produto", "Estoque atual", "Mínimo", "Compras", "Vendas", "Situação"]],
-                use_container_width=True, hide_index=True
-            )
+        for _, r in produtos.iterrows():
+            est = estoque_produto(r["nome"])
+            minimo = float(r["estoque_minimo"] or 0)
+            if est <= minimo:
+                baixos.append({
+                    "Produto": r["nome"],
+                    "Estoque": est,
+                    "Mínimo": minimo
+                })
+        if baixos:
+            st.dataframe(pd.DataFrame(baixos), use_container_width=True, hide_index=True)
         else:
             st.success("Nenhum produto abaixo do estoque mínimo.")
 
@@ -1849,35 +1480,12 @@ def painel():
                 hide_index=True
             )
 
-    st.markdown("---")
-    st.subheader("📦 Estoque atualizado")
-    estoque_painel = resumo_estoque()
-    if estoque_painel.empty:
-        st.info("Nenhum produto cadastrado.")
-    else:
-        st.dataframe(
-            estoque_painel[["Produto", "Categoria", "Compras", "Vendas", "Ajustes +", "Ajustes -", "Estoque atual", "Mínimo", "Situação"]],
-            use_container_width=True, hide_index=True
-        )
 
-
-# Inicialização segura: primeiro localiza/reutiliza o banco correto e cria
-# uma cópia antes de qualquer migração de estrutura.
-garantir_banco_correto()
-if os.path.exists(DB_FILE):
-    try:
-        if _db_record_count(DB_FILE) > 0:
-            # backup de segurança antes da migração desta versão
-            backups_existentes=list(Path(BACKUP_DIR).glob("kerofish_pre_update_*.db")) if Path(BACKUP_DIR).exists() else []
-            if not backups_existentes:
-                backup_db("pre_update")
-    except Exception:
-        pass
+# Inicialização
 init_db()
 
 # Logo
 st.sidebar.title("Kero Fish")
-st.sidebar.caption(f"Banco: {Path(DB_FILE).name}")
 logo_encontrada = None
 for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "JPEG"]:
     if os.path.exists(f"logo.{ext}"):
@@ -1948,4 +1556,3 @@ elif opcao == "Importar Planilha":
     pagina_importar()
 elif opcao == "Backup":
     pagina_backup()
-
