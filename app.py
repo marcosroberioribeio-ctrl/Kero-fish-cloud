@@ -282,6 +282,20 @@ def init_db():
 
     # Migração das estruturas antigas.
     add_column_if_missing(conn, "clientes", "endereco", "TEXT DEFAULT ''")
+
+    # Migração de fornecedores antigos. Sem estas colunas, a importação V9
+    # podia falhar e a transação inteira era desfeita, impedindo também
+    # a entrada das compras e vendas da planilha.
+    for col, definition in [
+        ("contato", "TEXT DEFAULT ''"),
+        ("telefone", "TEXT DEFAULT ''"),
+        ("endereco", "TEXT DEFAULT ''"),
+        ("produto_fornecido", "TEXT DEFAULT ''"),
+        ("prazo_pagamento", "TEXT DEFAULT ''"),
+        ("observacoes", "TEXT DEFAULT ''"),
+    ]:
+        add_column_if_missing(conn, "fornecedores", col, definition)
+
     add_column_if_missing(conn, "produtos", "unidade", "TEXT DEFAULT 'kg'")
     add_column_if_missing(conn, "produtos", "preco_venda", "REAL DEFAULT 0")
     add_column_if_missing(conn, "produtos", "custo_medio", "REAL DEFAULT 0")
@@ -1921,11 +1935,20 @@ init_db()
 # É idempotente e não duplica compras/vendas já existentes.
 try:
     importar_base_v9_embutida()
+    _qtd_compra_v9 = scalar("""SELECT COUNT(*) FROM compras WHERE lower(COALESCE(fornecedor,''))=lower('Fornecedor 1') AND lower(produto)=lower('Camarão GG') AND ABS(qtd-100)<0.000001 AND ABS(preco_kg-35)<0.000001 AND data_compra='2026-08-04'""")
+    _qtd_vendas_v9 = scalar("""SELECT COUNT(*) FROM vendas WHERE data_venda='2026-08-04' AND lower(COALESCE(cliente,''))=lower('Cliente Exemplo') AND ((lower(produto)=lower('Camarão GG') AND ABS(qtd_kg-20)<0.000001 AND ABS(preco_kg-49.9)<0.000001) OR (lower(produto)=lower('Camarão G') AND ABS(qtd_kg-10)<0.000001 AND ABS(preco_kg-44.9)<0.000001))""")
 except Exception as _erro_import_v9:
+    _qtd_compra_v9 = 0
+    _qtd_vendas_v9 = 0
     st.warning(f"Não foi possível concluir a migração automática da base V9: {_erro_import_v9}")
 
 # Logo
 st.sidebar.title("Kero Fish")
+st.sidebar.caption("Versão 10.2 — Compras/Vendas V9 corrigidas")
+if _qtd_compra_v9 >= 1 and _qtd_vendas_v9 >= 2:
+    st.sidebar.success("Base V9: 1 compra e 2 vendas carregadas")
+else:
+    st.sidebar.error(f"Base V9 incompleta: compras={int(_qtd_compra_v9 or 0)}, vendas={int(_qtd_vendas_v9 or 0)}")
 logo_encontrada = None
 for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "JPEG"]:
     if os.path.exists(f"logo.{ext}"):
