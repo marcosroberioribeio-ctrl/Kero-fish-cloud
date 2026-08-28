@@ -24,6 +24,8 @@ Principais melhorias:
 import os
 import shutil
 import sqlite3
+import unicodedata
+from pathlib import Path
 from datetime import datetime, date
 
 import pandas as pd
@@ -32,8 +34,19 @@ import streamlit as st
 
 st.set_page_config(page_title="Kero Fish ERP", layout="wide")
 
-DB_FILE = "kerofish.db"
-BACKUP_DIR = "backups"
+# Mantém banco, backups e arquivos ao lado do próprio programa, evitando
+# abrir um banco vazio quando o Streamlit é iniciado por outra pasta.
+APP_DIR = Path(__file__).resolve().parent
+DB_FILE = str(APP_DIR / "kerofish.db")
+BACKUP_DIR = str(APP_DIR / "backups")
+
+# Compatibilidade com instalações antigas que usavam caminho relativo.
+_legacy_db = Path.cwd() / "kerofish.db"
+if not Path(DB_FILE).exists() and _legacy_db.exists() and _legacy_db.resolve() != Path(DB_FILE).resolve():
+    try:
+        shutil.copy2(_legacy_db, DB_FILE)
+    except Exception:
+        pass
 
 FORMAS_PAGAMENTO = [
     "Dinheiro",
@@ -1552,80 +1565,243 @@ def pagina_normas():
 """)
 
 
+def _norm_texto(v):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return ""
+    return str(v).strip()
+
+
+def _norm_coluna(nome):
+    txt = unicodedata.normalize("NFKD", str(nome)).encode("ascii", "ignore").decode("ascii")
+    return " ".join(txt.lower().replace("_", " ").replace("-", " ").split())
+
+
+def _col(df, *nomes):
+    mapa = {_norm_coluna(c): c for c in df.columns}
+    for nome in nomes:
+        chave = _norm_coluna(nome)
+        if chave in mapa:
+            return mapa[chave]
+    return None
+
+
+def _valor(row, col, default=""):
+    if not col:
+        return default
+    v = row.get(col, default)
+    if pd.isna(v):
+        return default
+    return v
+
+
+def _numero(v, default=0.0):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return float(default)
+    if isinstance(v, (int, float)):
+        return float(v)
+    txt = str(v).strip().replace("R$", "").replace(" ", "")
+    if not txt:
+        return float(default)
+    if "," in txt and "." in txt:
+        txt = txt.replace(".", "").replace(",", ".")
+    elif "," in txt:
+        txt = txt.replace(",", ".")
+    try:
+        return float(txt)
+    except Exception:
+        return float(default)
+
+
+def _data_excel(v, default=""):
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return default
+    try:
+        dt = pd.to_datetime(v, dayfirst=True, errors="coerce")
+        if pd.isna(dt):
+            return _norm_texto(v) or default
+        return dt.strftime("%Y-%m-%d")
+    except Exception:
+        return _norm_texto(v) or default
+
+
+def _ja_existe(conn, tabela, where, params):
+    return conn.execute(f"SELECT id FROM {tabela} WHERE {where} LIMIT 1", params).fetchone() is not None
+
+
+def importar_planilha_completa(fonte_excel):
+    """Importa a planilha antiga para a estrutura atual sem duplicar registros.
+
+    A ordem é proposital: cadastros -> compras -> vendas. O financeiro e as
+    contas são reconstruídos pelas rotinas de integração já existentes.
+    """
+    backup = backup_db()
+    xls = pd.ExcelFile(fonte_excel)
+    planilhas = {_norm_coluna(s): s for s in xls.sheet_names}
+    cont = {"produtos": 0, "clientes": 0, "fornecedores": 0, "compras": 0, "vendas": 0}
+    ids_sincronizar = []
+
+    conn = get_conn()
+    try:
+        # PRODUTOS
+        sh = planilhas.get("produtos")
+        if sh:
+            df = pd.read_excel(xls, sheet_name=sh)
+            c_nome=_col(df,"Produto","Nome"); c_cat=_col(df,"Categoria"); c_un=_col(df,"Unidade")
+            c_min=_col(df,"Estoque Mínimo","Estoque Minimo","Mínimo"); c_custo=_col(df,"Custo","Custo Unitário","Custo Unitario")
+            c_preco=_col(df,"Preço de Venda","Preco de Venda","Preço Venda","Preco Venda"); c_ativo=_col(df,"Ativo")
+            c_forn=_col(df,"Fornecedor")
+            for _,row in df.iterrows():
+                nome=_norm_texto(_valor(row,c_nome))
+                if not nome: continue
+                categoria=_norm_texto(_valor(row,c_cat,"Outros")) or "Outros"
+                unidade=_norm_texto(_valor(row,c_un,"kg")) or "kg"
+                minimo=_numero(_valor(row,c_min,0)); custo=_numero(_valor(row,c_custo,0)); preco=_numero(_valor(row,c_preco,0))
+                ativo_txt=_norm_texto(_valor(row,c_ativo,"Sim")).lower(); ativo=0 if ativo_txt in ("nao","não","0","false","inativo") else 1
+                existe=conn.execute("SELECT id FROM produtos WHERE lower(nome)=lower(?)",(nome,)).fetchone()
+                if existe:
+                    conn.execute("UPDATE produtos SET categoria=?,unidade=?,preco_venda=?,custo_medio=?,estoque_minimo=?,ativo=? WHERE id=?",(categoria,unidade,preco,custo,minimo,ativo,existe["id"]))
+                else:
+                    conn.execute("INSERT INTO produtos (nome,categoria,unidade,preco_venda,custo_medio,estoque_minimo,ativo) VALUES (?,?,?,?,?,?,?)",(nome,categoria,unidade,preco,custo,minimo,ativo)); cont["produtos"]+=1
+                forn=_norm_texto(_valor(row,c_forn))
+                if forn and not _ja_existe(conn,"fornecedores","lower(fornecedor)=lower(?)",(forn,)):
+                    conn.execute("INSERT INTO fornecedores (fornecedor,produto_fornecido) VALUES (?,?)",(forn,nome)); cont["fornecedores"]+=1
+
+        # CLIENTES
+        sh = planilhas.get("clientes") or planilhas.get("cadastro clientes")
+        if sh:
+            df=pd.read_excel(xls,sheet_name=sh)
+            c_nome=_col(df,"Cliente","Nome"); c_tel=_col(df,"Telefone"); c_cid=_col(df,"Cidade"); c_end=_col(df,"Endereço","Endereco")
+            for _,row in df.iterrows():
+                nome=_norm_texto(_valor(row,c_nome))
+                if not nome: continue
+                tel=_norm_texto(_valor(row,c_tel)); cid=_norm_texto(_valor(row,c_cid)); end=_norm_texto(_valor(row,c_end))
+                ex=conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)",(nome,)).fetchone()
+                if ex:
+                    conn.execute("UPDATE clientes SET telefone=CASE WHEN ?<>'' THEN ? ELSE telefone END,cidade=CASE WHEN ?<>'' THEN ? ELSE cidade END,endereco=CASE WHEN ?<>'' THEN ? ELSE endereco END WHERE id=?",(tel,tel,cid,cid,end,end,ex["id"]))
+                else:
+                    conn.execute("INSERT INTO clientes (nome,telefone,cidade,endereco,data_cad) VALUES (?,?,?,?,?)",(nome,tel,cid,end,hoje())); cont["clientes"]+=1
+
+        # FORNECEDORES (se houver dados reais na aba)
+        sh = planilhas.get("fornecedores")
+        if sh:
+            df=pd.read_excel(xls,sheet_name=sh)
+            c_nome=_col(df,"Fornecedor","Nome"); c_tel=_col(df,"Telefone"); c_cont=_col(df,"Contato"); c_end=_col(df,"Endereço","Endereco"); c_prod=_col(df,"Produto","Produto Fornecido")
+            for _,row in df.iterrows():
+                nome=_norm_texto(_valor(row,c_nome))
+                if not nome or _norm_coluna(nome) in ("fornecedor","nome"): continue
+                tel=_norm_texto(_valor(row,c_tel)); contato=_norm_texto(_valor(row,c_cont)); end=_norm_texto(_valor(row,c_end)); prod=_norm_texto(_valor(row,c_prod))
+                ex=conn.execute("SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)",(nome,)).fetchone()
+                if ex:
+                    conn.execute("UPDATE fornecedores SET telefone=CASE WHEN ?<>'' THEN ? ELSE telefone END,contato=CASE WHEN ?<>'' THEN ? ELSE contato END,endereco=CASE WHEN ?<>'' THEN ? ELSE endereco END,produto_fornecido=CASE WHEN ?<>'' THEN ? ELSE produto_fornecido END WHERE id=?",(tel,tel,contato,contato,end,end,prod,prod,ex["id"]))
+                else:
+                    conn.execute("INSERT INTO fornecedores (fornecedor,telefone,contato,endereco,produto_fornecido) VALUES (?,?,?,?,?)",(nome,tel,contato,end,prod)); cont["fornecedores"]+=1
+
+        # COMPRAS
+        sh = planilhas.get("compras")
+        if sh:
+            df=pd.read_excel(xls,sheet_name=sh)
+            c_data=_col(df,"Data","Data da Compra","Data Compra"); c_forn=_col(df,"Fornecedor"); c_prod=_col(df,"Produto")
+            c_qtd=_col(df,"Quantidade","Qtd","Qtd Kg"); c_preco=_col(df,"Custo Unitário","Custo Unitario","Preço Kg","Preco Kg","Custo")
+            c_total=_col(df,"Total","Valor Total"); c_lote=_col(df,"Lote"); c_val=_col(df,"Validade"); c_freezer=_col(df,"Freezer","Local")
+            c_forma=_col(df,"Forma de Pagamento","Pagamento"); c_status=_col(df,"Status Pagamento","Status de Pagamento"); c_venc=_col(df,"Vencimento")
+            for _,row in df.iterrows():
+                prod=_norm_texto(_valor(row,c_prod)); forn=_norm_texto(_valor(row,c_forn)); qtd=_numero(_valor(row,c_qtd,0)); preco=_numero(_valor(row,c_preco,0)); total=_numero(_valor(row,c_total,0))
+                if not prod or qtd<=0: continue
+                if preco<=0 and total>0: preco=total/qtd
+                if total<=0: total=qtd*preco
+                data=_data_excel(_valor(row,c_data),hoje()); lote=_norm_texto(_valor(row,c_lote)); validade=_data_excel(_valor(row,c_val),"")
+                forma=_norm_texto(_valor(row,c_forma,"A prazo")) or "A prazo"; status=_norm_texto(_valor(row,c_status,"Pendente")) or "Pendente"
+                if status not in STATUS_PAGAMENTO: status="Pendente"
+                venc=_data_excel(_valor(row,c_venc),data); freezer=_norm_texto(_valor(row,c_freezer)); obs=f"Importado da planilha" + (f" | Freezer: {freezer}" if freezer else "")
+                if forn and not _ja_existe(conn,"fornecedores","lower(fornecedor)=lower(?)",(forn,)):
+                    conn.execute("INSERT INTO fornecedores (fornecedor,produto_fornecido) VALUES (?,?)",(forn,prod)); cont["fornecedores"]+=1
+                if not _ja_existe(conn,"compras","lower(COALESCE(fornecedor,''))=lower(?) AND lower(produto)=lower(?) AND ABS(qtd-?)<0.000001 AND ABS(preco_kg-?)<0.000001 AND data_compra=? AND COALESCE(lote,'')=?",(forn,prod,qtd,preco,data,lote)):
+                    cur=conn.execute("INSERT INTO compras (fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,forma_pagamento,status_pagamento,vencimento,observacoes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",(forn,prod,qtd,preco,total,data,lote,validade,forma,status,venc,obs)); ids_sincronizar.append(("compra",cur.lastrowid)); cont["compras"]+=1
+
+        # VENDAS
+        sh = planilhas.get("vendas")
+        if sh:
+            df=pd.read_excel(xls,sheet_name=sh)
+            c_data=_col(df,"Data","Data da Venda","Data Venda"); c_cli=_col(df,"Cliente"); c_prod=_col(df,"Produto"); c_qtd=_col(df,"Quantidade","Qtd","Qtd Kg")
+            c_preco=_col(df,"Preço Unitário","Preco Unitario","Preço Kg","Preco Kg"); c_total=_col(df,"Total","Valor Total"); c_forma=_col(df,"Pagamento","Forma de Pagamento")
+            c_pedido=_col(df,"Pedido","Nº Pedido","Numero Pedido"); c_venc=_col(df,"Vencimento"); c_desc=_col(df,"Desconto")
+            for idx,row in df.iterrows():
+                cli=_norm_texto(_valor(row,c_cli)); prod=_norm_texto(_valor(row,c_prod)); qtd=_numero(_valor(row,c_qtd,0)); preco=_numero(_valor(row,c_preco,0)); desconto=_numero(_valor(row,c_desc,0)); total_plan=_numero(_valor(row,c_total,0))
+                if not prod or qtd<=0: continue
+                if preco<=0 and total_plan>0: preco=(total_plan+desconto)/qtd
+                total=max(0.0,qtd*preco-desconto)
+                data=_data_excel(_valor(row,c_data),hoje()); forma=_norm_texto(_valor(row,c_forma,"Pix")) or "Pix"; venc=_data_excel(_valor(row,c_venc),data)
+                pedido=_norm_texto(_valor(row,c_pedido))
+                if not pedido: pedido=f"KF-IMPORT-{int(idx)+1:06d}"
+                # PIX/dinheiro/cartão/transferência são considerados recebidos; 'a prazo' fica pendente.
+                recebido=0.0 if _norm_coluna(forma) in ("a prazo","prazo") else total
+                status=_status_por_saldo(total,recebido)
+                if cli and not _ja_existe(conn,"clientes","lower(nome)=lower(?)",(cli,)):
+                    conn.execute("INSERT INTO clientes (nome,data_cad) VALUES (?,?)",(cli,hoje())); cont["clientes"]+=1
+                existe_pedido=conn.execute("SELECT id FROM vendas WHERE pedido=?",(pedido,)).fetchone()
+                if existe_pedido:
+                    continue
+                # Segunda trava contra duplicidade caso a planilha não tenha número de pedido.
+                if _ja_existe(conn,"vendas","lower(COALESCE(cliente,''))=lower(?) AND lower(produto)=lower(?) AND ABS(qtd_kg-?)<0.000001 AND ABS(preco_kg-?)<0.000001 AND data_venda=?",(cli,prod,qtd,preco,data)):
+                    continue
+                cur=conn.execute("INSERT INTO vendas (pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(pedido,cli,prod,qtd,preco,desconto,total,data,forma,status,recebido,venc,"Importado da planilha")); ids_sincronizar.append(("venda",cur.lastrowid)); cont["vendas"]+=1
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    # Usa a integração do próprio sistema para gerar caixa / contas sem duplicar.
+    for origem, oid in ids_sincronizar:
+        sincronizar_origem_financeira(origem, oid)
+
+    return cont, backup
+
+
 def pagina_importar():
     st.title("📥 Importar Planilha")
-    st.info("A importação abaixo procura um arquivo Excel cujo nome comece por 'KERO FISH' na pasta do sistema.")
+    st.info("Importa Produtos, Clientes, Fornecedores, Compras e Vendas para os módulos corretos. Antes de importar, o sistema cria um backup do banco.")
 
-    arquivo = None
-    for f in os.listdir("."):
-        if f.lower().startswith("kero fish") and f.lower().endswith(".xlsx"):
-            arquivo = f
-            break
+    encontrados = []
+    for base in {Path.cwd(), APP_DIR}:
+        try:
+            for f in base.iterdir():
+                if f.is_file() and f.suffix.lower() == ".xlsx" and _norm_coluna(f.name).startswith("kero fish"):
+                    encontrados.append(f)
+        except Exception:
+            pass
+    # remove duplicados preservando ordem
+    encontrados = list(dict.fromkeys(str(p.resolve()) for p in encontrados))
 
-    if arquivo:
-        st.success(f"Arquivo encontrado: {arquivo}")
-        if st.button("Importar clientes e fornecedores"):
-            try:
-                xls = pd.ExcelFile(arquivo)
-                conn = get_conn()
-                importadas = []
+    uploaded = st.file_uploader("Ou selecione a planilha Excel", type=["xlsx"], key="import_xlsx")
+    fonte = uploaded
+    nome_fonte = uploaded.name if uploaded is not None else None
 
-                for sheet in xls.sheet_names:
-                    df = pd.read_excel(xls, sheet_name=sheet)
-                    if df.empty:
-                        continue
+    if uploaded is None and encontrados:
+        escolhido = st.selectbox("Planilha encontrada no computador", encontrados)
+        fonte = escolhido
+        nome_fonte = os.path.basename(escolhido)
 
-                    sl = sheet.lower()
+    if fonte is None:
+        st.warning("Nenhuma planilha Kero Fish foi encontrada. Selecione o arquivo .xlsx acima.")
+        return
 
-                    if "fornecedor" in sl:
-                        for _, row in df.iterrows():
-                            vals = list(row.values)
-                            nome = str(vals[0]).strip() if len(vals) > 0 and pd.notna(vals[0]) else ""
-                            if not nome:
-                                continue
-                            tel = str(vals[1]).strip() if len(vals) > 1 and pd.notna(vals[1]) else ""
-                            contato = str(vals[2]).strip() if len(vals) > 2 and pd.notna(vals[2]) else ""
+    st.success(f"Planilha pronta para importar: {nome_fonte}")
+    st.warning("A importação NÃO apaga o banco atual e possui travas contra registros duplicados.")
 
-                            existe = conn.execute(
-                                "SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)",
-                                (nome,)
-                            ).fetchone()
-
-                            if not existe:
-                                conn.execute(
-                                    "INSERT INTO fornecedores (fornecedor,telefone,contato) VALUES (?,?,?)",
-                                    (nome, tel, contato)
-                                )
-                        importadas.append(sheet)
-
-                    elif "cliente" in sl:
-                        for _, row in df.iterrows():
-                            vals = list(row.values)
-                            nome = str(vals[0]).strip() if len(vals) > 0 and pd.notna(vals[0]) else ""
-                            if not nome:
-                                continue
-                            tel = str(vals[1]).strip() if len(vals) > 1 and pd.notna(vals[1]) else ""
-                            cidade = str(vals[2]).strip() if len(vals) > 2 and pd.notna(vals[2]) else ""
-
-                            existe = conn.execute(
-                                "SELECT id FROM clientes WHERE lower(nome)=lower(?)",
-                                (nome,)
-                            ).fetchone()
-
-                            if not existe:
-                                conn.execute(
-                                    "INSERT INTO clientes (nome,telefone,cidade,data_cad) VALUES (?,?,?,?)",
-                                    (nome, tel, cidade, hoje())
-                                )
-                        importadas.append(sheet)
-
-                conn.commit()
-                conn.close()
-                st.success("Importação concluída sem duplicar registros existentes.")
-            except Exception as e:
-                st.error(f"Erro na importação: {e}")
-    else:
-        st.warning("Nenhum arquivo 'KERO FISH*.xlsx' foi encontrado.")
+    if st.button("📥 IMPORTAR TODOS OS DADOS", type="primary"):
+        try:
+            cont, backup = importar_planilha_completa(fonte)
+            st.success("Importação concluída com sucesso.")
+            if backup:
+                st.caption(f"Backup criado antes da importação: {backup}")
+            c1,c2,c3,c4,c5=st.columns(5)
+            c1.metric("Produtos novos",cont["produtos"]); c2.metric("Clientes novos",cont["clientes"]); c3.metric("Fornecedores novos",cont["fornecedores"]); c4.metric("Compras novas",cont["compras"]); c5.metric("Vendas novas",cont["vendas"])
+            st.info("Compras e vendas importadas já entram no estoque. Pagamentos recebidos/pagos são refletidos no Financeiro; saldos pendentes aparecem em Contas a Receber/Pagar.")
+        except Exception as e:
+            st.error(f"Erro na importação: {e}")
 
 
 def pagina_backup():
