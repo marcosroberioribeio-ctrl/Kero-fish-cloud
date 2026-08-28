@@ -11,7 +11,7 @@ from .db import connect
 _MONEY_COLS = {
     "valor", "total", "custo_unitario", "preco_unitario", "preco_kg",
     "valor_total", "valor_pago", "valor_recebido", "taxa", "taxa_entrega",
-    "custo_medio", "preco_venda", "desconto"
+    "custo_medio", "preco_venda", "desconto", "faturamento", "total_comprado"
 }
 _DATE_COLS = {
     "data", "data_mov", "data_compra", "data_venda", "data_desp",
@@ -23,7 +23,13 @@ def _br_money(value):
     if value is None or pd.isna(value) or str(value).strip() == "":
         return "R$ 0,00"
     try:
-        n = float(value)
+        if isinstance(value, str):
+            s = value.replace("R$", "").replace(" ", "").strip()
+            if "," in s:
+                s = s.replace(".", "").replace(",", ".")
+            n = float(s)
+        else:
+            n = float(value)
         return f"R$ {n:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     except Exception:
         return str(value)
@@ -69,9 +75,9 @@ def query_df(sql: str, params: Iterable = ()) -> pd.DataFrame:
         df = pd.read_sql_query(sql, conn, params=tuple(params))
     for col in df.columns:
         key = str(col).strip().lower()
-        if key in _DATE_COLS:
+        if key in _DATE_COLS or key.startswith("data_"):
             df[col] = df[col].map(_br_date)
-        elif key in _MONEY_COLS:
+        elif key in _MONEY_COLS or key.startswith("valor_") or key.startswith("preco_") or key.startswith("custo_"):
             df[col] = df[col].map(_br_money)
     return df
 
