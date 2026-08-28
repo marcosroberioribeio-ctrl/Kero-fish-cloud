@@ -1,0 +1,1 @@
+Hotfix V12 Premium: correção de compatibilidade entre o esquema legado V10/V11 e o esquema canônico V12. Corrige consultas e migrações de Compras, Vendas, Financeiro, Despesas, Contas a Pagar, Contas a Receber, Entregas, Relatórios e Estoque. Também remove o slogan duplicado fora da arte da logo.
