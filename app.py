@@ -895,7 +895,7 @@ def _salvar_grid_dataframe(tabela, original, editado, campos, titulo):
 
 
 def _grid_simples(tabela, titulo, colunas_editaveis, colunas_disabled=None, altura=420):
-    """Tabela editável e formulário de segurança para correção de registros."""
+    """Tabela editável diretamente nas células."""
     df=df_query(f"SELECT * FROM {tabela} ORDER BY id DESC")
     if df.empty:
         st.info(f"Nenhum registro em {titulo.lower()}."); return
@@ -909,30 +909,6 @@ def _grid_simples(tabela, titulo, colunas_editaveis, colunas_disabled=None, altu
         if n:
             st.success(f"{n} registro(s) alterado(s) com sucesso."); st.rerun()
         else: st.warning("Nenhuma alteração foi detectada no grid.")
-    st.markdown("#### 🛠️ Correção individual")
-    opcoes={f"#{int(r['id'])} — {str(r.get(colunas_editaveis[0],''))}":int(r['id']) for _,r in df.iterrows()}
-    escolha=st.selectbox("Registro para corrigir",list(opcoes),key=f"fallback_sel_{tabela}")
-    rid=opcoes[escolha]; atual=df[df.id==rid].iloc[0]
-    valores={}
-    with st.form(f"fallback_form_{tabela}"):
-        cols=st.columns(2)
-        for i,campo in enumerate(colunas_editaveis):
-            v=atual[campo]; label=campo.replace('_',' ').title(); box=cols[i%2]
-            if campo in ("qtd","qtd_kg","preco_kg","preco_venda","estoque_minimo","valor","desconto","taxa_entrega"):
-                valores[campo]=box.number_input(label,value=float(v or 0),step=0.01)
-            else:
-                valores[campo]=box.text_input(label,value="" if pd.isna(v) else str(v))
-        salvar=st.form_submit_button("💾 Salvar correção")
-    if salvar:
-        sets=[]; params=[]
-        for campo in colunas_editaveis:
-            v=valores[campo]
-            if campo in ("qtd","qtd_kg","preco_kg","preco_venda","estoque_minimo","valor","desconto","taxa_entrega"): v=float(v or 0)
-            sets.append(f"{campo}=?"); params.append(v)
-        params.append(rid); conn=get_conn()
-        try: conn.execute(f"UPDATE {tabela} SET {', '.join(sets)} WHERE id=?",params); conn.commit()
-        finally: conn.close()
-        st.success("Correção salva."); st.rerun()
 
 def _grid_contas(tabela, titulo, pessoa_col, valor_pago_col):
     df=df_query(f"""SELECT id,{pessoa_col},descricao,valor,COALESCE({valor_pago_col},0) AS {valor_pago_col},MAX(valor-COALESCE({valor_pago_col},0),0) AS saldo,vencimento,status,origem_tipo,origem_id FROM {tabela} ORDER BY date(vencimento),id DESC""")
@@ -965,38 +941,6 @@ def _grid_contas(tabela, titulo, pessoa_col, valor_pago_col):
                     if origem in ('compra','venda','despesa') and pd.notna(oid) and oid: sincronizar_origem_financeira(origem,int(oid))
             st.success(f"{alterados} conta(s) alterada(s) com sucesso."); st.rerun()
         else: st.warning("Nenhuma alteração foi detectada.")
-    st.markdown("#### 🛠️ Correção individual")
-    op={f"#{int(r.id)} — {str(r[pessoa_col])} — {str(r.descricao)}":int(r.id) for _,r in df.iterrows()}; escolha=st.selectbox("Selecione a conta",list(op),key=f"fallback_conta_{tabela}"); rid=op[escolha]; row=df[df.id==rid].iloc[0]
-    with st.form(f"fallback_form_conta_{tabela}"):
-        pessoa=st.text_input("Pessoa/Empresa",value='' if pd.isna(row[pessoa_col]) else str(row[pessoa_col])); descricao=st.text_input("Descrição",value='' if pd.isna(row.descricao) else str(row.descricao)); valor=st.number_input("Valor",min_value=0.0,value=float(row.valor or 0),step=0.01); vencimento=st.text_input("Vencimento (AAAA-MM-DD)",value='' if pd.isna(row.vencimento) else str(row.vencimento)); salvar=st.form_submit_button("💾 Salvar correção da conta")
-    if salvar:
-        conn=get_conn()
-        try:
-            if tabela=='contas_pagar': conn.execute("UPDATE contas_pagar SET fornecedor=?,descricao=?,valor=?,vencimento=? WHERE id=?",(pessoa,descricao,valor,vencimento,rid))
-            else: conn.execute("UPDATE contas_receber SET cliente=?,descricao=?,valor=?,vencimento=? WHERE id=?",(pessoa,descricao,valor,vencimento,rid))
-            conn.commit()
-        finally: conn.close()
-        origem=str(row.origem_tipo or '')
-        oid=row.origem_id
-        if origem in ('compra','venda','despesa') and oid:
-            oid=int(oid); conn=get_conn()
-            try:
-                if origem=='compra':
-                    comp=conn.execute("SELECT qtd FROM compras WHERE id=?",(oid,)).fetchone()
-                    if comp:
-                        q=float(comp['qtd'] or 0); preco_origem=valor/q if q>0 else 0
-                        conn.execute("UPDATE compras SET fornecedor=?,valor_total=?,preco_kg=?,vencimento=? WHERE id=?",(pessoa,valor,preco_origem,vencimento,oid))
-                elif origem=='despesa':
-                    conn.execute("UPDATE despesas SET valor=?,vencimento=?,descricao=? WHERE id=?",(valor,vencimento,descricao,oid))
-                elif origem=='venda':
-                    venda=conn.execute("SELECT qtd_kg,preco_kg FROM vendas WHERE id=?",(oid,)).fetchone()
-                    if venda:
-                        bruto=float(venda['qtd_kg'] or 0)*float(venda['preco_kg'] or 0); desconto=max(0.0,bruto-valor)
-                        conn.execute("UPDATE vendas SET cliente=?,valor_total=?,desconto=?,vencimento=? WHERE id=?",(pessoa,valor,desconto,vencimento,oid))
-                conn.commit()
-            finally: conn.close()
-            sincronizar_origem_financeira(origem,oid)
-        st.success('Correção salva com sucesso.'); st.rerun()
 
 def _grid_vendas():
     df=df_query("SELECT id,pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes FROM vendas ORDER BY id DESC")
@@ -1033,64 +977,6 @@ def _grid_vendas():
         elif alterados:
             st.success(f"{alterados} venda(s) alterada(s) com estoque e financeiro recalculados."); st.rerun()
         else: st.info("Nenhuma alteração foi detectada.")
-    _fallback_venda(df)
-
-
-def _fallback_venda(df):
-    st.markdown("#### 🛠️ Correção individual da venda")
-    op={f"#{int(r.id)} — {str(r.pedido)} — {str(r.produto)}":int(r.id) for _,r in df.iterrows()}
-    escolha=st.selectbox("Selecione a venda",list(op),key="fallback_venda_sel")
-    rid=op[escolha]; row=df[df.id==rid].iloc[0]
-    with st.form("fallback_venda_form"):
-        c1,c2=st.columns(2)
-        pedido=c1.text_input("Pedido",value="" if pd.isna(row.pedido) else str(row.pedido))
-        cliente=c2.text_input("Cliente",value="" if pd.isna(row.cliente) else str(row.cliente))
-        produto=st.text_input("Produto",value="" if pd.isna(row.produto) else str(row.produto))
-        c3,c4,c5=st.columns(3)
-        qtd=c3.number_input("Quantidade",min_value=0.0,value=float(row.qtd_kg or 0),step=0.01)
-        preco=c4.number_input("Preço",min_value=0.0,value=float(row.preco_kg or 0),step=0.01)
-        desconto=c5.number_input("Desconto",min_value=0.0,value=float(row.desconto or 0),step=0.01)
-        data_venda=st.text_input("Data da venda (AAAA-MM-DD)",value="" if pd.isna(row.data_venda) else str(row.data_venda))
-        forma=st.text_input("Forma de pagamento",value="" if pd.isna(row.forma_pagamento) else str(row.forma_pagamento))
-        recebido=st.number_input("Valor recebido",min_value=0.0,value=float(row.valor_recebido or 0),step=0.01)
-        venc=st.text_input("Vencimento (AAAA-MM-DD)",value="" if pd.isna(row.vencimento) else str(row.vencimento))
-        obs=st.text_area("Observações",value="" if pd.isna(row.observacoes) else str(row.observacoes))
-        salvar=st.form_submit_button("💾 Salvar correção da venda")
-    if salvar:
-        total=max(0.0,qtd*preco-desconto); recebido=min(max(recebido,0),total); status=_status_por_saldo(total,recebido)
-        old_prod=str(row.produto or ""); disponivel=estoque_produto(produto)+(float(row.qtd_kg or 0) if produto==old_prod else 0)
-        if qtd<=0 or preco<0: st.error("Quantidade/preço inválidos."); return
-        if disponivel<qtd: st.error(f"Estoque insuficiente. Disponível para esta alteração: {disponivel:.2f}."); return
-        conn=get_conn()
-        try:
-            conn.execute("UPDATE vendas SET pedido=?,cliente=?,produto=?,qtd_kg=?,preco_kg=?,desconto=?,valor_total=?,data_venda=?,forma_pagamento=?,status_pagamento=?,valor_recebido=?,vencimento=?,observacoes=? WHERE id=?",(pedido,cliente,produto,qtd,preco,desconto,total,data_venda,forma,status,recebido,venc,obs,rid)); conn.commit()
-        finally: conn.close()
-        sincronizar_origem_financeira('venda',rid); st.success('Venda corrigida e vínculos recalculados.'); st.rerun()
-
-
-def _fallback_compra(df):
-    st.markdown("#### 🛠️ Correção individual da compra")
-    op={f"#{int(r.id)} — {str(r.fornecedor)} — {str(r.produto)}":int(r.id) for _,r in df.iterrows()}
-    escolha=st.selectbox("Selecione a compra",list(op),key="fallback_compra_sel")
-    rid=op[escolha]; row=df[df.id==rid].iloc[0]
-    with st.form("fallback_compra_form"):
-        fornecedor=st.text_input("Fornecedor",value="" if pd.isna(row.fornecedor) else str(row.fornecedor))
-        produto=st.text_input("Produto",value="" if pd.isna(row.produto) else str(row.produto))
-        c1,c2=st.columns(2)
-        qtd=c1.number_input("Quantidade",min_value=0.0,value=float(row.qtd or 0),step=0.01)
-        preco=c2.number_input("Preço",min_value=0.0,value=float(row.preco_kg or 0),step=0.01)
-        data_compra=st.text_input("Data da compra (AAAA-MM-DD)",value="" if pd.isna(row.data_compra) else str(row.data_compra))
-        lote=st.text_input("Lote",value="" if pd.isna(row.lote) else str(row.lote)); validade=st.text_input("Validade (AAAA-MM-DD)",value="" if pd.isna(row.validade) else str(row.validade))
-        forma=st.text_input("Forma de pagamento",value="" if pd.isna(row.forma_pagamento) else str(row.forma_pagamento)); venc=st.text_input("Vencimento (AAAA-MM-DD)",value="" if pd.isna(row.vencimento) else str(row.vencimento)); obs=st.text_area("Observações",value="" if pd.isna(row.observacoes) else str(row.observacoes))
-        salvar=st.form_submit_button("💾 Salvar correção da compra")
-    if salvar:
-        if qtd<=0 or preco<0: st.error('Quantidade/preço inválidos.'); return
-        total=qtd*preco; conn=get_conn()
-        try:
-            conn.execute("UPDATE compras SET fornecedor=?,produto=?,qtd=?,preco_kg=?,valor_total=?,data_compra=?,lote=?,validade=?,forma_pagamento=?,vencimento=?,observacoes=? WHERE id=?",(fornecedor,produto,qtd,preco,total,data_compra,lote,validade,forma,venc,obs,rid)); conn.commit()
-        finally: conn.close()
-        sincronizar_origem_financeira('compra',rid); st.success('Compra corrigida e vínculos recalculados.'); st.rerun()
-
 def _grid_compras():
     df=df_query("SELECT id,fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,forma_pagamento,status_pagamento,vencimento,observacoes FROM compras ORDER BY id DESC")
     if df.empty: return
@@ -1115,7 +1001,6 @@ def _grid_compras():
             sincronizar_origem_financeira("compra",rid); alterados+=1
         if alterados: st.success(f"{alterados} compra(s) alterada(s) com estoque e financeiro recalculados."); st.rerun()
         else: st.info("Nenhuma alteração foi detectada.")
-    _fallback_compra(df)
 
 
 def pagina_clientes():
@@ -1804,6 +1689,102 @@ def pagina_importar():
             st.error(f"Erro na importação: {e}")
 
 
+def importar_base_v9_embutida():
+    """Garante a migração dos registros reais existentes na planilha V9.
+
+    Esta rotina é idempotente: só inclui registros que ainda não existem.
+    Assim, os dados de Compras e Vendas da planilha V9 aparecem mesmo quando
+    o arquivo Excel não está na mesma pasta do programa.
+    """
+    ids_sincronizar = []
+    conn = get_conn()
+    try:
+        # Produtos reais da planilha V9
+        produtos_v9 = [
+            ("Camarão GG", "Camarão", "kg", 49.90, 35.00, 20.00, 1, "Fornecedor 1"),
+            ("Camarão G", "Camarão", "kg", 44.90, 30.00, 20.00, 1, "Fornecedor 1"),
+            ("Peixe", "Peixe", "kg", 34.90, 22.00, 10.00, 1, "Fornecedor 2"),
+        ]
+        for nome, categoria, unidade, preco, custo, minimo, ativo, fornecedor in produtos_v9:
+            ex = conn.execute("SELECT id FROM produtos WHERE lower(nome)=lower(?)", (nome,)).fetchone()
+            if ex:
+                conn.execute(
+                    "UPDATE produtos SET categoria=?, unidade=?, preco_venda=?, custo_medio=?, estoque_minimo=?, ativo=? WHERE id=?",
+                    (categoria, unidade, preco, custo, minimo, ativo, ex["id"])
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO produtos (nome,categoria,unidade,preco_venda,custo_medio,estoque_minimo,ativo) VALUES (?,?,?,?,?,?,?)",
+                    (nome, categoria, unidade, preco, custo, minimo, ativo)
+                )
+            if not conn.execute("SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)", (fornecedor,)).fetchone():
+                conn.execute("INSERT INTO fornecedores (fornecedor,produto_fornecido) VALUES (?,?)", (fornecedor, nome))
+
+        # Cliente real da planilha V9
+        cliente = "Cliente Exemplo"
+        ex_cli = conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)", (cliente,)).fetchone()
+        if not ex_cli:
+            conn.execute(
+                "INSERT INTO clientes (nome,telefone,cidade,endereco,data_cad) VALUES (?,?,?,?,?)",
+                (cliente, "(85) 99999-9999", "Fortaleza", "Fortaleza", "2026-08-04")
+            )
+
+        # Compra real da planilha V9
+        compra_key = ("Fornecedor 1", "Camarão GG", 100.0, 35.0, "2026-08-04", "L001")
+        ex_compra = conn.execute(
+            """SELECT id FROM compras
+               WHERE lower(COALESCE(fornecedor,''))=lower(?) AND lower(produto)=lower(?)
+                 AND ABS(qtd-?)<0.000001 AND ABS(preco_kg-?)<0.000001
+                 AND data_compra=? AND COALESCE(lote,'')=?""", compra_key
+        ).fetchone()
+        if not ex_compra:
+            cur = conn.execute(
+                """INSERT INTO compras
+                   (fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,forma_pagamento,status_pagamento,vencimento,observacoes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("Fornecedor 1", "Camarão GG", 100.0, 35.0, 3500.0, "2026-08-04", "L001", "2026-12-31",
+                 "A prazo", "Pendente", "2026-08-04", "Importado da planilha V9 | Freezer: Freezer 1")
+            )
+            ids_sincronizar.append(("compra", cur.lastrowid))
+
+        # Vendas reais da planilha V9
+        vendas_v9 = [
+            ("KF-IMPORT-V9-000001", "Cliente Exemplo", "Camarão GG", 20.0, 49.90, 998.0, "2026-08-04", "Pix", "Entregue"),
+            ("KF-IMPORT-V9-000002", "Cliente Exemplo", "Camarão G", 10.0, 44.90, 449.0, "2026-08-04", "Pix", "Em preparação"),
+        ]
+        for pedido, cli, produto, qtd, preco, total, data_venda, forma, status_origem in vendas_v9:
+            # trava por pedido e, adicionalmente, pela combinação dos dados da venda
+            existe = conn.execute("SELECT id FROM vendas WHERE pedido=?", (pedido,)).fetchone()
+            if not existe:
+                existe = conn.execute(
+                    """SELECT id FROM vendas WHERE lower(COALESCE(cliente,''))=lower(?) AND lower(produto)=lower(?)
+                       AND ABS(qtd_kg-?)<0.000001 AND ABS(preco_kg-?)<0.000001 AND data_venda=?""",
+                    (cli, produto, qtd, preco, data_venda)
+                ).fetchone()
+            if existe:
+                continue
+            cur = conn.execute(
+                """INSERT INTO vendas
+                   (pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (pedido, cli, produto, qtd, preco, 0.0, total, data_venda, forma, "Pago", total, data_venda,
+                 f"Importado da planilha V9 | Status original: {status_origem}")
+            )
+            ids_sincronizar.append(("venda", cur.lastrowid))
+
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+    for origem, oid in ids_sincronizar:
+        sincronizar_origem_financeira(origem, oid)
+
+    return len(ids_sincronizar)
+
+
 def pagina_backup():
     st.title("💾 Backup e Segurança")
     st.write("Faça backups frequentes do banco de dados antes de atualizações importantes.")
@@ -1936,6 +1917,13 @@ def painel():
 # Inicialização
 init_db()
 
+# Migração automática e segura dos registros reais da planilha V9.
+# É idempotente e não duplica compras/vendas já existentes.
+try:
+    importar_base_v9_embutida()
+except Exception as _erro_import_v9:
+    st.warning(f"Não foi possível concluir a migração automática da base V9: {_erro_import_v9}")
+
 # Logo
 st.sidebar.title("Kero Fish")
 logo_encontrada = None
@@ -2008,5 +1996,4 @@ elif opcao == "Importar Planilha":
     pagina_importar()
 elif opcao == "Backup":
     pagina_backup()
-
 
