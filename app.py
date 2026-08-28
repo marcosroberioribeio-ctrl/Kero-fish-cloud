@@ -282,20 +282,6 @@ def init_db():
 
     # Migração das estruturas antigas.
     add_column_if_missing(conn, "clientes", "endereco", "TEXT DEFAULT ''")
-
-    # Migração de fornecedores antigos. Sem estas colunas, a importação V9
-    # podia falhar e a transação inteira era desfeita, impedindo também
-    # a entrada das compras e vendas da planilha.
-    for col, definition in [
-        ("contato", "TEXT DEFAULT ''"),
-        ("telefone", "TEXT DEFAULT ''"),
-        ("endereco", "TEXT DEFAULT ''"),
-        ("produto_fornecido", "TEXT DEFAULT ''"),
-        ("prazo_pagamento", "TEXT DEFAULT ''"),
-        ("observacoes", "TEXT DEFAULT ''"),
-    ]:
-        add_column_if_missing(conn, "fornecedores", col, definition)
-
     add_column_if_missing(conn, "produtos", "unidade", "TEXT DEFAULT 'kg'")
     add_column_if_missing(conn, "produtos", "preco_venda", "REAL DEFAULT 0")
     add_column_if_missing(conn, "produtos", "custo_medio", "REAL DEFAULT 0")
@@ -1703,89 +1689,75 @@ def pagina_importar():
             st.error(f"Erro na importação: {e}")
 
 
-def importar_base_v9_embutida():
-    """Garante a migração dos registros reais existentes na planilha V9.
 
-    Esta rotina é idempotente: só inclui registros que ainda não existem.
-    Assim, os dados de Compras e Vendas da planilha V9 aparecem mesmo quando
-    o arquivo Excel não está na mesma pasta do programa.
+def garantir_dados_reais_planilha_v9():
+    """Carrega exatamente os registros existentes na planilha V9 enviada pelo usuário.
+
+    É idempotente: executa em toda inicialização e só inclui o que ainda não existe.
+    A rotina usa os dados reais das abas Produtos, Clientes, Compras e Vendas.
     """
-    ids_sincronizar = []
     conn = get_conn()
     try:
-        # Produtos reais da planilha V9
-        produtos_v9 = [
-            ("Camarão GG", "Camarão", "kg", 49.90, 35.00, 20.00, 1, "Fornecedor 1"),
-            ("Camarão G", "Camarão", "kg", 44.90, 30.00, 20.00, 1, "Fornecedor 1"),
-            ("Peixe", "Peixe", "kg", 34.90, 22.00, 10.00, 1, "Fornecedor 2"),
+        # Produtos da planilha V9
+        produtos = [
+            ("Camarão GG", "Camarão", "kg", 20.0, 35.0, 49.90),
+            ("Camarão G", "Camarão", "kg", 20.0, 30.0, 44.90),
+            ("Peixe", "Peixe", "kg", 10.0, 22.0, 34.90),
         ]
-        for nome, categoria, unidade, preco, custo, minimo, ativo, fornecedor in produtos_v9:
-            ex = conn.execute("SELECT id FROM produtos WHERE lower(nome)=lower(?)", (nome,)).fetchone()
-            if ex:
-                conn.execute(
-                    "UPDATE produtos SET categoria=?, unidade=?, preco_venda=?, custo_medio=?, estoque_minimo=?, ativo=? WHERE id=?",
-                    (categoria, unidade, preco, custo, minimo, ativo, ex["id"])
-                )
+        for nome, categoria, unidade, minimo, custo, preco in produtos:
+            row = conn.execute("SELECT id FROM produtos WHERE lower(nome)=lower(?)", (nome,)).fetchone()
+            if row:
+                conn.execute("""UPDATE produtos SET categoria=?,unidade=?,estoque_minimo=?,custo_medio=?,preco_venda=?,ativo=1 WHERE id=?""",
+                             (categoria, unidade, minimo, custo, preco, row["id"]))
             else:
-                conn.execute(
-                    "INSERT INTO produtos (nome,categoria,unidade,preco_venda,custo_medio,estoque_minimo,ativo) VALUES (?,?,?,?,?,?,?)",
-                    (nome, categoria, unidade, preco, custo, minimo, ativo)
-                )
+                conn.execute("""INSERT INTO produtos (nome,categoria,unidade,estoque_minimo,custo_medio,preco_venda,ativo)
+                                VALUES (?,?,?,?,?,?,1)""", (nome,categoria,unidade,minimo,custo,preco))
+
+        # Fornecedores citados na planilha
+        for fornecedor, produto in [("Fornecedor 1", "Camarão GG / Camarão G"), ("Fornecedor 2", "Peixe")]:
             if not conn.execute("SELECT id FROM fornecedores WHERE lower(fornecedor)=lower(?)", (fornecedor,)).fetchone():
-                conn.execute("INSERT INTO fornecedores (fornecedor,produto_fornecido) VALUES (?,?)", (fornecedor, nome))
+                conn.execute("INSERT INTO fornecedores (fornecedor,produto_fornecido) VALUES (?,?)", (fornecedor,produto))
 
-        # Cliente real da planilha V9
-        cliente = "Cliente Exemplo"
-        ex_cli = conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)", (cliente,)).fetchone()
-        if not ex_cli:
-            conn.execute(
-                "INSERT INTO clientes (nome,telefone,cidade,endereco,data_cad) VALUES (?,?,?,?,?)",
-                (cliente, "(85) 99999-9999", "Fortaleza", "Fortaleza", "2026-08-04")
-            )
+        # Cliente da planilha
+        if not conn.execute("SELECT id FROM clientes WHERE lower(nome)=lower(?)", ("Cliente Exemplo",)).fetchone():
+            conn.execute("""INSERT INTO clientes (nome,telefone,cidade,endereco,data_cad)
+                            VALUES (?,?,?,?,?)""",
+                         ("Cliente Exemplo","(85) 99999-9999","Fortaleza","Fortaleza","2026-08-04"))
 
-        # Compra real da planilha V9
-        compra_key = ("Fornecedor 1", "Camarão GG", 100.0, 35.0, "2026-08-04", "L001")
-        ex_compra = conn.execute(
-            """SELECT id FROM compras
-               WHERE lower(COALESCE(fornecedor,''))=lower(?) AND lower(produto)=lower(?)
-                 AND ABS(qtd-?)<0.000001 AND ABS(preco_kg-?)<0.000001
-                 AND data_compra=? AND COALESCE(lote,'')=?""", compra_key
-        ).fetchone()
-        if not ex_compra:
-            cur = conn.execute(
-                """INSERT INTO compras
-                   (fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,forma_pagamento,status_pagamento,vencimento,observacoes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-                ("Fornecedor 1", "Camarão GG", 100.0, 35.0, 3500.0, "2026-08-04", "L001", "2026-12-31",
-                 "A prazo", "Pendente", "2026-08-04", "Importado da planilha V9 | Freezer: Freezer 1")
-            )
-            ids_sincronizar.append(("compra", cur.lastrowid))
+        # Compra da planilha: 04/08/2026 | Fornecedor 1 | Camarão GG | 100 kg | R$ 35 | L001 | 31/12/2026 | Freezer 1
+        compra = conn.execute("""SELECT id FROM compras
+            WHERE lower(COALESCE(fornecedor,''))=lower(?) AND lower(produto)=lower(?)
+              AND ABS(COALESCE(qtd,0)-100)<0.000001 AND ABS(COALESCE(preco_kg,0)-35)<0.000001
+              AND data_compra='2026-08-04' AND COALESCE(lote,'')='L001'""",
+            ("Fornecedor 1","Camarão GG")).fetchone()
+        if not compra:
+            conn.execute("""INSERT INTO compras
+                (fornecedor,produto,qtd,preco_kg,valor_total,data_compra,lote,validade,
+                 forma_pagamento,status_pagamento,vencimento,observacoes)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ("Fornecedor 1","Camarão GG",100.0,35.0,3500.0,"2026-08-04","L001","2026-12-31",
+                 "A prazo","Pendente","2026-08-04","Planilha V9 — Freezer 1"))
 
-        # Vendas reais da planilha V9
-        vendas_v9 = [
-            ("KF-IMPORT-V9-000001", "Cliente Exemplo", "Camarão GG", 20.0, 49.90, 998.0, "2026-08-04", "Pix", "Entregue"),
-            ("KF-IMPORT-V9-000002", "Cliente Exemplo", "Camarão G", 10.0, 44.90, 449.0, "2026-08-04", "Pix", "Em preparação"),
+        # Vendas da planilha. O campo Total estava em branco no Excel, portanto é calculado por quantidade x preço.
+        vendas = [
+            ("KF-V9-000001","Cliente Exemplo","Camarão GG",20.0,49.90,998.0,"2026-08-04","Pix","Entregue","Sim"),
+            ("KF-V9-000002","Cliente Exemplo","Camarão G",10.0,44.90,449.0,"2026-08-04","Pix","Em preparação","Não"),
         ]
-        for pedido, cli, produto, qtd, preco, total, data_venda, forma, status_origem in vendas_v9:
-            # trava por pedido e, adicionalmente, pela combinação dos dados da venda
-            existe = conn.execute("SELECT id FROM vendas WHERE pedido=?", (pedido,)).fetchone()
+        for pedido, cliente, produto, qtd, preco, total, data_venda, forma, status_original, entrega in vendas:
+            existe = conn.execute("""SELECT id FROM vendas
+                WHERE (pedido=?) OR (
+                    lower(COALESCE(cliente,''))=lower(?) AND lower(produto)=lower(?)
+                    AND ABS(COALESCE(qtd_kg,0)-?)<0.000001
+                    AND ABS(COALESCE(preco_kg,0)-?)<0.000001
+                    AND data_venda=?)""",
+                (pedido,cliente,produto,qtd,preco,data_venda)).fetchone()
             if not existe:
-                existe = conn.execute(
-                    """SELECT id FROM vendas WHERE lower(COALESCE(cliente,''))=lower(?) AND lower(produto)=lower(?)
-                       AND ABS(qtd_kg-?)<0.000001 AND ABS(preco_kg-?)<0.000001 AND data_venda=?""",
-                    (cli, produto, qtd, preco, data_venda)
-                ).fetchone()
-            if existe:
-                continue
-            cur = conn.execute(
-                """INSERT INTO vendas
-                   (pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (pedido, cli, produto, qtd, preco, 0.0, total, data_venda, forma, "Pago", total, data_venda,
-                 f"Importado da planilha V9 | Status original: {status_origem}")
-            )
-            ids_sincronizar.append(("venda", cur.lastrowid))
-
+                conn.execute("""INSERT INTO vendas
+                    (pedido,cliente,produto,qtd_kg,preco_kg,desconto,valor_total,data_venda,
+                     forma_pagamento,status_pagamento,valor_recebido,vencimento,observacoes)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (pedido,cliente,produto,qtd,preco,0.0,total,data_venda,forma,"Pago",total,data_venda,
+                     f"Planilha V9 — Status: {status_original} — Entrega: {entrega}"))
         conn.commit()
     except Exception:
         conn.rollback()
@@ -1793,11 +1765,19 @@ def importar_base_v9_embutida():
     finally:
         conn.close()
 
-    for origem, oid in ids_sincronizar:
-        sincronizar_origem_financeira(origem, oid)
+    # Recria vínculos financeiros das linhas V9 sem duplicar registros.
+    ids_compra = df_query("""SELECT id FROM compras WHERE data_compra='2026-08-04' AND fornecedor='Fornecedor 1' AND produto='Camarão GG' AND ABS(qtd-100)<0.000001 AND ABS(preco_kg-35)<0.000001""")
+    for rid in ids_compra['id'].tolist() if not ids_compra.empty else []:
+        sincronizar_origem_financeira('compra', int(rid))
+    ids_vendas = df_query("""SELECT id FROM vendas WHERE pedido IN ('KF-V9-000001','KF-V9-000002')""")
+    for rid in ids_vendas['id'].tolist() if not ids_vendas.empty else []:
+        sincronizar_origem_financeira('venda', int(rid))
 
-    return len(ids_sincronizar)
 
+def status_base_v9():
+    compras = int(scalar("""SELECT COUNT(*) FROM compras WHERE data_compra='2026-08-04' AND fornecedor='Fornecedor 1' AND produto='Camarão GG' AND ABS(qtd-100)<0.000001 AND ABS(preco_kg-35)<0.000001""") or 0)
+    vendas = int(scalar("""SELECT COUNT(*) FROM vendas WHERE pedido IN ('KF-V9-000001','KF-V9-000002')""") or 0)
+    return compras, vendas
 
 def pagina_backup():
     st.title("💾 Backup e Segurança")
@@ -1931,24 +1911,21 @@ def painel():
 # Inicialização
 init_db()
 
-# Migração automática e segura dos registros reais da planilha V9.
-# É idempotente e não duplica compras/vendas já existentes.
+# V10.3: garante no próprio banco os dados REAIS da planilha V9.
 try:
-    importar_base_v9_embutida()
-    _qtd_compra_v9 = scalar("""SELECT COUNT(*) FROM compras WHERE lower(COALESCE(fornecedor,''))=lower('Fornecedor 1') AND lower(produto)=lower('Camarão GG') AND ABS(qtd-100)<0.000001 AND ABS(preco_kg-35)<0.000001 AND data_compra='2026-08-04'""")
-    _qtd_vendas_v9 = scalar("""SELECT COUNT(*) FROM vendas WHERE data_venda='2026-08-04' AND lower(COALESCE(cliente,''))=lower('Cliente Exemplo') AND ((lower(produto)=lower('Camarão GG') AND ABS(qtd_kg-20)<0.000001 AND ABS(preco_kg-49.9)<0.000001) OR (lower(produto)=lower('Camarão G') AND ABS(qtd_kg-10)<0.000001 AND ABS(preco_kg-44.9)<0.000001))""")
-except Exception as _erro_import_v9:
-    _qtd_compra_v9 = 0
-    _qtd_vendas_v9 = 0
-    st.warning(f"Não foi possível concluir a migração automática da base V9: {_erro_import_v9}")
+    garantir_dados_reais_planilha_v9()
+    _v9_compras, _v9_vendas = status_base_v9()
+except Exception as _e_v9:
+    _v9_compras, _v9_vendas = 0, 0
+    st.error(f"Falha ao carregar a base V9: {_e_v9}")
 
 # Logo
 st.sidebar.title("Kero Fish")
-st.sidebar.caption("Versão 10.2 — Compras/Vendas V9 corrigidas")
-if _qtd_compra_v9 >= 1 and _qtd_vendas_v9 >= 2:
-    st.sidebar.success("Base V9: 1 compra e 2 vendas carregadas")
+st.sidebar.caption("VERSÃO 10.3 — MIGRAÇÃO EXATA DA PLANILHA V9")
+if _v9_compras >= 1 and _v9_vendas >= 2:
+    st.sidebar.success(f"✅ Planilha V9 carregada: {_v9_compras} compra e {_v9_vendas} vendas")
 else:
-    st.sidebar.error(f"Base V9 incompleta: compras={int(_qtd_compra_v9 or 0)}, vendas={int(_qtd_vendas_v9 or 0)}")
+    st.sidebar.error(f"⚠️ Base V9 incompleta: {_v9_compras} compra(s), {_v9_vendas} venda(s)")
 logo_encontrada = None
 for ext in ["png", "jpg", "jpeg", "PNG", "JPG", "JPEG"]:
     if os.path.exists(f"logo.{ext}"):
@@ -2019,4 +1996,3 @@ elif opcao == "Importar Planilha":
     pagina_importar()
 elif opcao == "Backup":
     pagina_backup()
-
