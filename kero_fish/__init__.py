@@ -10,6 +10,7 @@ APP_NAME = "Kero Fish ERP Premium"
 # - camada analítica de reconciliação, custos, estoque e auditoria;
 # - guardas de consistência para estoque e importações;
 # - proteção integral de exercícios fechados;
+# - análise executiva com DRE gerencial, caixa projetado e riscos;
 # - autenticação individual dos sócios e administração de acessos;
 # - acabamento visual premium.
 from . import ui as ui  # noqa: E402
@@ -21,6 +22,7 @@ from .audit_context import install_audit_context  # noqa: E402
 from .analyst_layer import install_analyst_layer  # noqa: E402
 from .consistency import install_consistency_guards  # noqa: E402
 from .closing_guards import install_closing_guards  # noqa: E402
+from .analytics import install_management_analytics  # noqa: E402
 from .premium_visual import install_premium_visual  # noqa: E402
 from .executive_luxury import install_executive_luxury  # noqa: E402
 from .security import install_security  # noqa: E402
@@ -35,6 +37,7 @@ install_audit_context(ui)
 install_analyst_layer(ui)
 install_consistency_guards(ui)
 install_closing_guards(ui)
+install_management_analytics(ui)
 install_premium_visual(ui)
 install_executive_luxury(ui)
 install_security(ui)
