@@ -2,6 +2,7 @@
 """Kero Fish ERP Premium 12.1 - dashboard executivo de teste."""
 import base64
 from datetime import date
+import altair as alt
 import pandas as pd
 from kero_fish import ui
 
@@ -57,6 +58,12 @@ def _safe_df(sql,params=None):
         with ui.connect() as conn:return pd.read_sql_query(sql,conn,params=params)
     except Exception:return pd.DataFrame()
 
+def _moeda_br_num(v):
+    try:
+        return f"R$ {float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
+    except Exception:
+        return "R$ 0,00"
+
 def painel_executivo():
     m=ui.dashboard_metrics(); hoje=date.today(); hoje_br=hoje.strftime("%d/%m/%Y"); ano=hoje.year; mes=hoje.month
     vendas_mes=_safe_df("SELECT COALESCE(SUM(total),0) AS total, COUNT(*) AS qtd FROM vendas WHERE CAST(substr(data,1,4) AS INTEGER)=? AND CAST(substr(data,6,2) AS INTEGER)=?",[ano,mes])
@@ -76,11 +83,19 @@ def painel_executivo():
     mensal=_safe_df("SELECT CAST(substr(data,6,2) AS INTEGER) AS mes, SUM(COALESCE(total,0)) AS Vendas FROM vendas WHERE CAST(substr(data,1,4) AS INTEGER)=? GROUP BY CAST(substr(data,6,2) AS INTEGER)",[ano])
     nomes=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
     base=pd.DataFrame({"mes":range(1,13),"Mês":nomes}); mensal=base.merge(mensal,on="mes",how="left").fillna({"Vendas":0})
+    mensal["Valor"] = mensal["Vendas"].apply(_moeda_br_num)
     top=_safe_df("SELECT produto AS Produto, SUM(COALESCE(total,0)) AS Faturamento FROM vendas WHERE CAST(substr(data,1,4) AS INTEGER)=? GROUP BY produto ORDER BY Faturamento DESC LIMIT 5",[ano])
     cats=_safe_df("SELECT COALESCE(p.categoria,'Outros') AS Categoria, SUM(COALESCE(v.total,0)) AS Total FROM vendas v LEFT JOIN produtos p ON lower(trim(p.nome))=lower(trim(v.produto)) WHERE CAST(substr(v.data,1,4) AS INTEGER)=? GROUP BY COALESCE(p.categoria,'Outros') ORDER BY Total DESC",[ano])
     a,b,c=ui.st.columns([1.4,1,1])
     with a:
-        ui.st.markdown(f"<div class='panel-card'><h3>Vendas por mês — {ano}</h3>",unsafe_allow_html=True); ui.st.bar_chart(mensal.set_index("Mês")[["Vendas"]],height=210); ui.st.markdown("</div>",unsafe_allow_html=True)
+        ui.st.markdown(f"<div class='panel-card'><h3>Vendas por mês — {ano}</h3>",unsafe_allow_html=True)
+        grafico = alt.Chart(mensal).mark_bar(cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
+            x=alt.X("Mês:N", sort=nomes, title=None, axis=alt.Axis(labelAngle=-55)),
+            y=alt.Y("Vendas:Q", title="Vendas (R$)"),
+            tooltip=[alt.Tooltip("Mês:N", title="Mês"), alt.Tooltip("Valor:N", title="Vendas")],
+        ).properties(height=210)
+        ui.st.altair_chart(grafico, use_container_width=True)
+        ui.st.markdown("</div>",unsafe_allow_html=True)
     with b:
         ui.st.markdown("<div class='panel-card'><h3>Vendas por Categoria</h3>",unsafe_allow_html=True)
         if not cats.empty:
