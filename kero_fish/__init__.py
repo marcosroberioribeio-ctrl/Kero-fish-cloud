@@ -1,2 +1,2 @@
-__version__ = "12.0.2"
+__version__ = "12.1.0"
 APP_NAME = "Kero Fish ERP Premium"
