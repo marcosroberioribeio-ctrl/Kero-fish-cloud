@@ -12,6 +12,7 @@ SECURITY_BUILD = "2026-09-02-login-gate"
 # - guardas de consistência para estoque e importações;
 # - proteção integral de exercícios fechados;
 # - análise executiva com DRE gerencial, caixa projetado e riscos;
+# - pedidos online recebidos pela Loja Kero Fish e integração transacional ao ERP;
 # - autenticação individual dos sócios e administração de acessos;
 # - acabamento visual premium.
 from . import ui as ui  # noqa: E402
@@ -24,6 +25,7 @@ from .analyst_layer import install_analyst_layer  # noqa: E402
 from .consistency import install_consistency_guards  # noqa: E402
 from .closing_guards import install_closing_guards  # noqa: E402
 from .analytics import install_management_analytics  # noqa: E402
+from .online_orders import install_online_orders  # noqa: E402
 from .premium_visual import install_premium_visual  # noqa: E402
 from .executive_luxury import install_executive_luxury  # noqa: E402
 from .security import install_security  # noqa: E402
@@ -39,6 +41,7 @@ install_analyst_layer(ui)
 install_consistency_guards(ui)
 install_closing_guards(ui)
 install_management_analytics(ui)
+install_online_orders(ui)
 install_premium_visual(ui)
 install_executive_luxury(ui)
 install_security(ui)
