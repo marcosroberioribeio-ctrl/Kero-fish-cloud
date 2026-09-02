@@ -10,8 +10,8 @@ def _money(value: float) -> str:
         return "R$ 0,00"
 
 
-def _period_values(ui, year: int, month: int) -> tuple[float, float, float]:
-    """Retorna faturamento, custo variável estimado (CMV) e despesas do período."""
+def _period_values(ui, year: int, month: int) -> tuple[float, float, float, float, int]:
+    """Retorna faturamento, CMV, despesas variáveis, fixas e não classificadas."""
     ym = f"{year:04d}-{month:02d}"
     with ui.connect() as conn:
         revenue = conn.execute(
@@ -19,19 +19,21 @@ def _period_values(ui, year: int, month: int) -> tuple[float, float, float]:
             SELECT COALESCE(SUM(CASE WHEN COALESCE(valor_total,0)<>0 THEN valor_total ELSE COALESCE(total,0) END),0)
             FROM vendas
             WHERE substr(COALESCE(NULLIF(data_venda,''),data),1,7)=?
+              AND upper(COALESCE(status_pedido,''))<>'CANCELADO'
             """,
             (ym,),
         ).fetchone()[0]
 
-        variable = conn.execute(
+        cmv = conn.execute(
             """
             SELECT COALESCE(SUM(
                 (CASE WHEN COALESCE(v.qtd_kg,0)<>0 THEN v.qtd_kg ELSE COALESCE(v.quantidade,0) END)
                 * COALESCE(p.custo_medio,0)
             ),0)
             FROM vendas v
-            LEFT JOIN produtos p ON p.nome=v.produto
+            LEFT JOIN produtos p ON lower(p.nome)=lower(v.produto)
             WHERE substr(COALESCE(NULLIF(v.data_venda,''),v.data),1,7)=?
+              AND upper(COALESCE(v.status_pedido,''))<>'CANCELADO'
             """,
             (ym,),
         ).fetchone()[0]
@@ -41,11 +43,32 @@ def _period_values(ui, year: int, month: int) -> tuple[float, float, float]:
             SELECT COALESCE(SUM(valor),0)
             FROM despesas
             WHERE substr(COALESCE(NULLIF(data_desp,''),data),1,7)=?
+              AND tipo_custo='Fixo'
             """,
             (ym,),
         ).fetchone()[0]
 
-    return float(revenue or 0), float(variable or 0), float(fixed or 0)
+        variable_expenses = conn.execute(
+            """
+            SELECT COALESCE(SUM(valor),0)
+            FROM despesas
+            WHERE substr(COALESCE(NULLIF(data_desp,''),data),1,7)=?
+              AND tipo_custo='Variável'
+            """,
+            (ym,),
+        ).fetchone()[0]
+
+        unclassified = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM despesas
+            WHERE substr(COALESCE(NULLIF(data_desp,''),data),1,7)=?
+              AND COALESCE(tipo_custo,'Não classificado') NOT IN ('Fixo','Variável')
+            """,
+            (ym,),
+        ).fetchone()[0]
+
+    return float(revenue or 0), float(cmv or 0), float(variable_expenses or 0), float(fixed or 0), int(unclassified or 0)
 
 
 def install_break_even(ui) -> None:
@@ -61,8 +84,8 @@ def install_break_even(ui) -> None:
         st.markdown("---")
         st.markdown("### 📊 Ponto de Equilíbrio")
         st.caption(
-            "Mostra o faturamento mínimo necessário para cobrir os custos do período. "
-            "Os valores sugeridos vêm dos dados do ERP e podem ser ajustados para análise gerencial."
+            "Calculado a partir do faturamento, CMV e despesas classificadas como fixas ou variáveis no ERP. "
+            "Os valores continuam editáveis para simulações gerenciais."
         )
 
         today = date.today()
@@ -76,7 +99,14 @@ def install_break_even(ui) -> None:
             key="be_month",
         ))
 
-        revenue, variable_suggested, fixed_suggested = _period_values(ui, year, month)
+        revenue, cmv, variable_expenses, fixed_suggested, unclassified = _period_values(ui, year, month)
+        variable_suggested = cmv + variable_expenses
+
+        if unclassified:
+            st.warning(
+                f"Há {unclassified} despesa(s) ainda sem classificação no período. "
+                "Classifique-as em Despesas para aumentar a precisão do ponto de equilíbrio."
+            )
 
         st.markdown("#### Base do cálculo")
         b1, b2, b3 = st.columns(3)
@@ -87,7 +117,7 @@ def install_break_even(ui) -> None:
             step=100.0,
             format="%.2f",
             key=f"be_fixed_{year}_{month}",
-            help="Sugestão: despesas registradas no mês. Ajuste se houver despesas variáveis misturadas.",
+            help="Somatório das despesas classificadas como Fixo no período.",
         ))
         variable = float(b2.number_input(
             "Custos variáveis / CMV",
@@ -96,7 +126,7 @@ def install_break_even(ui) -> None:
             step=100.0,
             format="%.2f",
             key=f"be_variable_{year}_{month}",
-            help="Estimado pelas quantidades vendidas multiplicadas pelo custo médio dos produtos.",
+            help="CMV das vendas + despesas classificadas como Variável.",
         ))
         revenue_input = float(b3.number_input(
             "Faturamento do período",
@@ -122,19 +152,17 @@ def install_break_even(ui) -> None:
         if revenue_input <= 0:
             st.info("Ainda não há faturamento suficiente no período para calcular o ponto de equilíbrio.")
         elif margin_ratio <= 0:
-            st.error("A margem de contribuição está zerada ou negativa. Revise preços e custos variáveis.")
+            st.error("A margem de contribuição está zerada ou negativa. Revise preços, CMV e custos variáveis.")
         elif revenue_input >= break_even:
-            st.success(
-                f"Acima do ponto de equilíbrio em {_money(safety)} "
-                f"({safety_pct:.1f}% acima do mínimo necessário).".replace(".", ",")
-            )
+            pct_text = f"{safety_pct:.1f}".replace(".", ",")
+            st.success(f"Acima do ponto de equilíbrio em {_money(safety)} ({pct_text}% acima do mínimo necessário).")
         else:
             missing = break_even - revenue_input
             st.warning(f"Faltam {_money(missing)} de faturamento para atingir o ponto de equilíbrio deste período.")
 
         st.caption(
-            "Critério: Ponto de equilíbrio = custos fixos ÷ margem de contribuição percentual. "
-            "Como a Kero Fish trabalha com vários produtos, o indicador é apresentado em faturamento (R$), que é o formato mais útil para gestão."
+            "Critério: ponto de equilíbrio = custos fixos ÷ margem de contribuição percentual. "
+            "Para uma operação com vários produtos, o indicador em faturamento (R$) é o mais útil para gestão."
         )
         return result
 
