@@ -2,7 +2,7 @@ name: Kero Fish Quality Gate
 
 on:
   push:
-    branches: [main, v12.1.0-profissional]
+    branches: [main, v12.1.0-profissional, v12.1.0-integracao-analista]
   pull_request:
     branches: [main]
 
