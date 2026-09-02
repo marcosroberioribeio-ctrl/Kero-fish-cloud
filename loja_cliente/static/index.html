@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#08233d" />
+  <meta name="description" content="Kero Fish — peixes, camarões e produtos selecionados com pedido online." />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/static/styles.css" />
+  <title>Kero Fish</title>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/logo.jpg" alt="Kero Fish" class="logo" />
+      <div><strong>Kero Fish</strong><span>Peixes, camarões e muito mais</span></div>
+    </div>
+    <button id="cartButton" class="cart-button" aria-label="Abrir carrinho">🛒 <span id="cartCount">0</span></button>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <span class="eyebrow">Qualidade que chega até você</span>
+        <h1>Seu pedido Kero Fish, rápido e fácil.</h1>
+        <p>Escolha seus produtos, monte o carrinho e envie o pedido pelo celular.</p>
+      </div>
+    </section>
+
+    <section class="toolbar">
+      <input id="searchInput" type="search" placeholder="Buscar peixe, camarão, castanha..." aria-label="Buscar produtos" />
+    </section>
+
+    <section>
+      <div class="section-title"><h2>Produtos</h2><span id="productStatus">Carregando...</span></div>
+      <div id="productGrid" class="product-grid"></div>
+    </section>
+  </main>
+
+  <aside id="cartDrawer" class="drawer" aria-hidden="true">
+    <div class="drawer-head"><h2>Seu carrinho</h2><button id="closeCart" class="icon-button">✕</button></div>
+    <div id="cartItems" class="cart-items"></div>
+    <div class="cart-summary">
+      <div><span>Subtotal</span><strong id="cartSubtotal">R$ 0,00</strong></div>
+      <small>A taxa de entrega será confirmada antes do fechamento.</small>
+      <button id="checkoutButton" class="primary-button">Continuar pedido</button>
+    </div>
+  </aside>
+  <div id="overlay" class="overlay"></div>
+
+  <dialog id="checkoutDialog" class="checkout-dialog">
+    <form id="checkoutForm" method="dialog">
+      <div class="dialog-head"><div><span class="eyebrow">Finalização</span><h2>Dados para entrega</h2></div><button type="button" id="closeCheckout" class="icon-button">✕</button></div>
+      <div class="form-grid">
+        <label class="wide">Nome<input name="name" autocomplete="name" required /></label>
+        <label>Telefone<input name="phone" inputmode="tel" autocomplete="tel" required /></label>
+        <label>CEP<input name="cep" inputmode="numeric" autocomplete="postal-code" required maxlength="10" /></label>
+        <label class="wide">Endereço<input name="address" autocomplete="street-address" required /></label>
+        <label>Número<input name="number" required /></label>
+        <label>Complemento<input name="complement" /></label>
+        <label>Bairro<input name="neighborhood" required /></label>
+        <label>Cidade<input name="city" value="Fortaleza" required /></label>
+        <label class="wide">Forma de pagamento
+          <select name="payment_method" required>
+            <option value="PIX">Pix</option>
+            <option value="DINHEIRO">Dinheiro</option>
+            <option value="CARTAO_ENTREGA">Cartão na entrega</option>
+          </select>
+        </label>
+        <label class="wide">Observações<textarea name="notes" rows="3" placeholder="Ex.: retirar cabeça, horário preferido..."></textarea></label>
+      </div>
+      <div class="checkout-total"><span>Total dos produtos</span><strong id="checkoutTotal">R$ 0,00</strong></div>
+      <button id="sendOrderButton" class="primary-button" type="submit">Enviar pedido</button>
+      <p id="checkoutMessage" class="message" role="status"></p>
+    </form>
+  </dialog>
+
+  <template id="productTemplate">
+    <article class="product-card">
+      <div class="product-image"><span>🐟</span></div>
+      <div class="product-body">
+        <span class="category"></span>
+        <h3></h3>
+        <div class="product-footer"><strong class="price"></strong><button class="add-button">Adicionar</button></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
