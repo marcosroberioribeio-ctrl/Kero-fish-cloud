@@ -1,0 +1,10 @@
+{
+  "name": "Kero Fish",
+  "short_name": "Kero Fish",
+  "description": "Loja online Kero Fish",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#08233d",
+  "icons": []
+}
