@@ -10,12 +10,9 @@ html body [data-testid='stHeader']{background:rgba(10,39,64,.96)!important;borde
 /* Marca d'água premium fica acima do fundo e abaixo da interação. */
 html body [data-testid='stAppViewContainer']::after{content:'KERO  FISH';position:fixed;left:60%;top:55%;transform:translate(-50%,-50%) rotate(-9deg);z-index:9998;pointer-events:none;user-select:none;white-space:nowrap;font-family:Georgia,'Times New Roman',serif;font-size:clamp(92px,11vw,178px);font-weight:800;letter-spacing:.10em;color:rgba(244,207,111,.055);text-shadow:0 1px 0 rgba(255,255,255,.02)}
 
-/* Títulos principais ficam praticamente inalterados. */
 html body .kero-top h2{font-size:32px!important;line-height:1.3!important}
 html body .kero-top .premium{font-size:16px!important;padding:7px 15px!important}
 html body .exec-title{font-size:34px!important;line-height:1.25!important}
-
-/* Ajuste fino de legibilidade: aproximadamente +8% nos textos secundários. */
 html body .kero-date{font-size:17px!important}
 html body .exec-sub{font-size:18.4px!important;line-height:1.45!important;color:#edf5fb!important}
 html body .metric-card{height:124px!important;padding:16px 15px!important}
@@ -26,17 +23,17 @@ html body [data-testid='stVerticalBlockBorderWrapper']{background:linear-gradien
 html body [data-testid='stVerticalBlockBorderWrapper'] h3{font-size:23px!important}
 html body .alert-label{font-size:15px!important}.alert-value{font-size:27px!important}.alert-note{font-size:14px!important}.footerbar{font-size:14px!important}
 
-/* Altair/SVG: melhora meses, eixos, legenda e rótulos do gráfico sem ampliar o título. */
-html body [data-testid='stVegaLiteChart'] svg text{font-size:13px!important}
+/* Gráfico mensal: retorna para proporção intermediária e limpa. */
+html body [data-testid='stVegaLiteChart'] svg text{font-size:11px!important}
 
-/* Abas e formulários */
+/* Abas e formulários permanecem com a legibilidade aprovada. */
 html body .kf-page-title{font-size:31px!important}html body .kf-page-sub{font-size:16px!important;color:#d9e8f2!important}
 html body label[data-testid='stWidgetLabel'] p{font-size:15px!important}
 html body [data-testid='stTextInput'] input,html body [data-testid='stNumberInput'] input,html body [data-testid='stDateInput'] input,html body textarea{font-size:16px!important;background:#24567c!important}
 html body [data-testid='stExpander']{background:linear-gradient(180deg,rgba(24,62,91,.94),rgba(16,47,73,.92))!important;border-color:#47789c!important}
 html body .stButton>button,html body .stFormSubmitButton>button{font-size:15px!important}
 
-@media(max-width:900px){html body [data-testid='stAppViewContainer']::after{font-size:80px;left:58%}html body .exec-title{font-size:29px!important}html body .metric-value{font-size:21px!important}}
+@media(max-width:900px){html body [data-testid='stAppViewContainer']::after{font-size:80px;left:58%}html body .exec-title{font-size:29px!important}html body .metric-value{font-size:21px!important}html body [data-testid='stVegaLiteChart'] svg text{font-size:10px!important}}
 </style>
 """
 
