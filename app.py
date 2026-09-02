@@ -67,7 +67,7 @@ ui.PREMIUM_CSS = f"""
 html,body,[class*="css"]{{font-family:Inter,Segoe UI,Arial,sans-serif}}
 .stApp{{background:linear-gradient(135deg,#061d35 0%,#031426 55%,#041a30 100%);color:#fff}}
 [data-testid="stHeader"]{{background:#031426e8;border-bottom:1px solid #174b76}}
-.block-container{{padding-top:.8rem;max-width:none!important;width:100%!important;padding-left:.7rem!important;padding-right:.7rem!important}}
+.block-container{{padding-top:3.4rem!important;max-width:none!important;width:100%!important;padding-left:.7rem!important;padding-right:.7rem!important}}
 [data-testid="stSidebar"]{{width:220px!important;min-width:220px!important;max-width:220px!important;background:linear-gradient(180deg,#04182c 0%,#021120 100%);border-right:1px solid #1c4468;box-shadow:8px 0 30px #0006}}
 [data-testid="stSidebar"]>div:first-child{{width:220px!important}}
 [data-testid="stSidebar"] img{{border-radius:50%;border:3px solid var(--gold);box-shadow:0 0 0 4px #fff,0 0 0 6px var(--gold),0 10px 28px #0007;margin:4px auto 0}}
@@ -75,7 +75,7 @@ html,body,[class*="css"]{{font-family:Inter,Segoe UI,Arial,sans-serif}}
 [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){{background:linear-gradient(90deg,#e9a915,#f6c94e);color:#08213b;font-weight:900;box-shadow:0 5px 14px #0005}}
 .brand-version{{display:flex;justify-content:center;gap:6px;align-items:center;margin:12px 0 14px}}.brand-version b{{background:#f5b927;color:#152238;padding:5px 10px;border-radius:8px}}.brand-version span{{background:#0879d9;padding:5px 9px;border-radius:8px;color:white}}
 .user-card{{margin-top:12px;padding:10px;border:1px solid #234d70;border-radius:10px;background:#071f38;font-size:12px}}
-.kero-top{{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--gold);padding:0 2px 8px;margin-bottom:10px}}.kero-top h2{{margin:0;font-size:26px}}.kero-top .premium{{background:#f4b928;color:#17233b;padding:5px 12px;border-radius:8px;font-weight:900;margin-left:8px}}.kero-date{{color:#e8f2fb;font-weight:650;font-size:13px}}
+.kero-top{{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--gold);padding:0 2px 8px;margin:0 0 10px}}.kero-top h2{{margin:0;font-size:26px;line-height:1.25}}.kero-top .premium{{background:#f4b928;color:#17233b;padding:5px 12px;border-radius:8px;font-weight:900;margin-left:8px;display:inline-block;vertical-align:middle}}.kero-date{{color:#e8f2fb;font-weight:650;font-size:13px}}
 .exec-title{{font-size:27px;font-weight:900;margin:0}}.exec-sub{{color:#d2e1ee;margin-bottom:10px;font-size:13px}}
 .kpi-grid{{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:10px}}
 .metric-card{{min-width:0;height:108px;border-radius:11px;padding:12px 11px;border:1px solid #ffffff2b;box-shadow:0 7px 20px #0004;position:relative;overflow:hidden}}.metric-card:after{{content:"";position:absolute;width:70px;height:70px;border-radius:50%;right:-27px;top:-28px;background:#ffffff16}}
