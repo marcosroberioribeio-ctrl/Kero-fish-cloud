@@ -10,7 +10,23 @@ ui.PREMIUM_CSS = """
 .stApp { background: radial-gradient(circle at 75% 0%, #285b82 0%, #183e62 38%, #102b49 100%); color:#f8fbff; }
 [data-testid="stSidebar"] { background:linear-gradient(180deg,#245578 0%,#173b5d 100%); border-right:1px solid rgba(255,255,255,.14); }
 [data-testid="stMetric"] { background:rgba(31,75,111,.88); border:1px solid rgba(79,220,232,.24); border-radius:16px; padding:14px 16px; box-shadow:0 10px 24px rgba(0,0,0,.14); }
-[data-testid="stDataFrame"], [data-testid="stDataEditor"] { border:1px solid rgba(79,220,232,.30); border-radius:14px; overflow:hidden; background:rgba(28,67,101,.52); }
+
+/* Tabelas: superfície um pouco mais clara e cabeçalho visualmente destacado. */
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+    border:1px solid rgba(95,229,239,.42);
+    border-radius:14px;
+    overflow:hidden;
+    background:rgba(43,86,120,.76);
+    box-shadow:0 8px 20px rgba(0,0,0,.10);
+}
+[data-testid="stDataFrame"] > div, [data-testid="stDataEditor"] > div {
+    background:rgba(43,86,120,.42);
+}
+
+/* Sidebar limpa: detalhes técnicos permanecem disponíveis em Diagnóstico. */
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { display:none !important; }
+[data-testid="stSidebar"] [data-testid="stAlert"] { display:none !important; }
+
 div.stButton > button { border-radius:10px; font-weight:700; border:1px solid rgba(79,220,232,.42); }
 div.stButton > button[kind="primary"] { background:linear-gradient(90deg,#19cde1,#48e4d8); color:#08233a; border:0; }
 .kero-title { font-size:2rem; font-weight:800; letter-spacing:-.02em; margin-bottom:.1rem; color:#ffffff; }
