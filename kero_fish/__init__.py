@@ -29,6 +29,7 @@ from .online_orders import install_online_orders  # noqa: E402
 from .premium_visual import install_premium_visual  # noqa: E402
 from .executive_luxury import install_executive_luxury  # noqa: E402
 from .security import install_security  # noqa: E402
+from .store_navigation import install_store_navigation  # noqa: E402
 
 ui.init_db()
 ensure_professional_schema()
@@ -45,3 +46,4 @@ install_online_orders(ui)
 install_premium_visual(ui)
 install_executive_luxury(ui)
 install_security(ui)
+install_store_navigation(ui)
