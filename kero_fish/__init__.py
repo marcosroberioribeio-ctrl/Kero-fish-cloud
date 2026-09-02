@@ -1,5 +1,6 @@
 __version__ = "12.1.0"
 APP_NAME = "Kero Fish ERP Premium"
+SECURITY_BUILD = "2026-09-02-login-gate"
 
 # A V12.1 de teste instala camadas aditivas sobre o núcleo estável:
 # - migrações profissionais de endereço/exercícios anuais;
