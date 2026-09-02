@@ -2,6 +2,20 @@
 """Kero Fish ERP Premium 12.1 - entrada da versão de teste."""
 from kero_fish import ui
 
+# Usa o novo logo oficial enviado para a branch profissional, sem alterar a
+# versão estável/main. Mantemos o bootstrap original e trocamos somente a
+# imagem retornada para a sidebar.
+_original_bootstrap = ui._bootstrap
+
+
+def _bootstrap_com_logo_oficial():
+    bundled, _logo_antigo = _original_bootstrap()
+    logo_oficial = ui.APP_ROOT / "IMG-20260826-WA0013 (1).jpg"
+    return bundled, logo_oficial
+
+
+ui._bootstrap = _bootstrap_com_logo_oficial
+
 # Tema Premium Conforto: mantém a identidade azul/turquesa, com fundo mais
 # claro e contraste mais confortável para uso prolongado.
 ui.PREMIUM_CSS = """
