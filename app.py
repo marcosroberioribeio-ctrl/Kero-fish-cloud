@@ -16,6 +16,28 @@ def _bootstrap_com_logo_oficial():
 
 ui._bootstrap = _bootstrap_com_logo_oficial
 
+# Sidebar refinada: evita ampliar o logo até a largura total do contêiner,
+# preservando melhor a nitidez, e remove o texto "PEIXE E CAMARÃO" duplicado.
+def _sidebar_profissional(logo):
+    with ui.st.sidebar:
+        ui.st.markdown("## Kero Fish")
+        if logo.exists():
+            ui.st.image(str(logo), width=245)
+        ui.st.markdown(
+            f"<div class='kero-badge'>ERP Premium v{ui.__version__}</div>",
+            unsafe_allow_html=True,
+        )
+        ui.st.markdown("---")
+        pages = [
+            "Painel Geral", "Produtos", "Fornecedores", "Compras", "Estoque", "Clientes",
+            "Vendas", "Financeiro", "Despesas", "Contas a Pagar", "Contas a Receber",
+            "Entregas", "Relatórios", "Importar Planilha", "Auditoria", "Diagnóstico", "Backup"
+        ]
+        return ui.st.radio("Navegação", pages, label_visibility="collapsed")
+
+
+ui.sidebar = _sidebar_profissional
+
 # Tema Premium Conforto: mantém a identidade azul/turquesa, com fundo mais
 # claro e contraste mais confortável para uso prolongado.
 ui.PREMIUM_CSS = """
@@ -37,16 +59,12 @@ ui.PREMIUM_CSS = """
     background:rgba(43,86,120,.42);
 }
 
-/* Sidebar limpa: detalhes técnicos permanecem disponíveis em Diagnóstico. */
-[data-testid="stSidebar"] [data-testid="stCaptionContainer"] { display:none !important; }
-[data-testid="stSidebar"] [data-testid="stAlert"] { display:none !important; }
-
 div.stButton > button { border-radius:10px; font-weight:700; border:1px solid rgba(79,220,232,.42); }
 div.stButton > button[kind="primary"] { background:linear-gradient(90deg,#19cde1,#48e4d8); color:#08233a; border:0; }
 .kero-title { font-size:2rem; font-weight:800; letter-spacing:-.02em; margin-bottom:.1rem; color:#ffffff; }
 .kero-sub { color:#c2dff2; margin-bottom:1rem; }
 .kero-card { background:rgba(31,75,111,.82); border:1px solid rgba(255,255,255,.12); border-radius:16px; padding:16px; margin-bottom:14px; }
-.kero-badge { display:inline-block; padding:6px 10px; border-radius:999px; background:rgba(36,215,231,.16); color:#baf8ff; border:1px solid rgba(79,220,232,.32); font-size:.82rem; font-weight:700; }
+.kero-badge { display:inline-block; padding:6px 10px; border-radius:999px; background:rgba(36,215,231,.16); color:#baf8ff; border:1px solid rgba(79,220,232,.32); font-size:.82rem; font-weight:700; margin-top:8px; }
 .kero-ok { color:#8dffc0; font-weight:700; }
 .kero-warn { color:#ffe09a; font-weight:700; }
 </style>
