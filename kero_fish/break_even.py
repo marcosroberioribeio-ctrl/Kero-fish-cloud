@@ -139,7 +139,7 @@ def install_break_even(ui) -> None:
 
         contribution = revenue_input - variable
         margin_ratio = (contribution / revenue_input) if revenue_input > 0 else 0.0
-        break_even = (fixed / margin_ratio) if margin_ratio > 0 else 0.0
+        break_even = (fixed / margin_ratio) if fixed > 0 and margin_ratio > 0 else 0.0
         safety = revenue_input - break_even if break_even > 0 else 0.0
         safety_pct = (safety / break_even * 100.0) if break_even > 0 else 0.0
 
@@ -153,6 +153,11 @@ def install_break_even(ui) -> None:
             st.info("Ainda não há faturamento suficiente no período para calcular o ponto de equilíbrio.")
         elif margin_ratio <= 0:
             st.error("A margem de contribuição está zerada ou negativa. Revise preços, CMV e custos variáveis.")
+        elif fixed <= 0:
+            if unclassified:
+                st.info("Ponto de equilíbrio ainda não calculável — classifique as despesas pendentes como fixas ou variáveis.")
+            else:
+                st.info("Ponto de equilíbrio ainda não calculável — informe ou classifique os custos/despesas fixas do período.")
         elif revenue_input >= break_even:
             pct_text = f"{safety_pct:.1f}".replace(".", ",")
             st.success(f"Acima do ponto de equilíbrio em {_money(safety)} ({pct_text}% acima do mínimo necessário).")
