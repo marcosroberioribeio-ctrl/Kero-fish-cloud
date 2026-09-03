@@ -7,6 +7,7 @@ SECURITY_BUILD = "2026-09-02-login-gate"
 # - sequência anual de pedidos;
 # - CEP automático;
 # - operações financeiras integradas e ponto de equilíbrio;
+# - filtros mensais/anuais nas listagens de vendas e compras;
 # - auditoria vinculada ao usuário da sessão;
 # - camada analítica de reconciliação, custos, estoque e auditoria;
 # - guardas de consistência para estoque e importações;
@@ -20,6 +21,7 @@ from .annual import ensure_professional_schema, install_annual_order_patch  # no
 from .cep_ui import install_cep_overrides  # noqa: E402
 from .premium_ops import install_premium_operations  # noqa: E402
 from .sales_filter import install_sales_filter  # noqa: E402
+from .purchases_filter import install_purchases_filter  # noqa: E402
 from .break_even import install_break_even  # noqa: E402
 from .audit_context import install_audit_context  # noqa: E402
 from .analyst_layer import install_analyst_layer  # noqa: E402
@@ -37,6 +39,7 @@ install_annual_order_patch()
 install_cep_overrides(ui)
 install_premium_operations(ui)
 install_sales_filter(ui)
+install_purchases_filter(ui)
 install_break_even(ui)
 install_audit_context(ui)
 install_analyst_layer(ui)
