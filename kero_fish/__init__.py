@@ -19,6 +19,7 @@ from . import ui as ui  # noqa: E402
 from .annual import ensure_professional_schema, install_annual_order_patch  # noqa: E402
 from .cep_ui import install_cep_overrides  # noqa: E402
 from .premium_ops import install_premium_operations  # noqa: E402
+from .sales_filter import install_sales_filter  # noqa: E402
 from .break_even import install_break_even  # noqa: E402
 from .audit_context import install_audit_context  # noqa: E402
 from .analyst_layer import install_analyst_layer  # noqa: E402
@@ -35,6 +36,7 @@ ensure_professional_schema()
 install_annual_order_patch()
 install_cep_overrides(ui)
 install_premium_operations(ui)
+install_sales_filter(ui)
 install_break_even(ui)
 install_audit_context(ui)
 install_analyst_layer(ui)
