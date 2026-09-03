@@ -1,253 +1,118 @@
 # -*- coding: utf-8 -*-
+"""Kero Fish ERP Premium 12.1 - painel executivo profissional de teste."""
 from __future__ import annotations
 
-import tempfile
+import base64
 from datetime import date
-from pathlib import Path
 
+import altair as alt
 import pandas as pd
-import streamlit as st
 
-from kero_fish import APP_NAME, __version__
-from kero_fish.bundled_data import ensure_workbook
-from kero_fish.db import APP_ROOT, BACKUP_DIR, DB_PATH, backup_db, connect, init_db
-from kero_fish.importer import import_excel
-from kero_fish.services import dashboard_metrics, query_df, register_purchase, register_sale, save_grid, stock_df
-from kero_fish.utils import moeda, hoje
+from kero_fish import ui
+from kero_fish.dashboard_period import metrics_for_period
 
-st.set_page_config(page_title=APP_NAME, page_icon="🐟", layout="wide", initial_sidebar_state="expanded")
+_original_bootstrap = ui._bootstrap
 
-PREMIUM_CSS = """
-<style>
-:root { --kero-navy:#071a33; --kero-blue:#0f3a69; --kero-cyan:#17d4e8; --kero-gold:#d7a438; }
-.stApp { background: radial-gradient(circle at 75% 0%, #102d50 0%, #071a33 35%, #041225 100%); color:#f6fbff; }
-[data-testid="stSidebar"] { background:linear-gradient(180deg,#102a4b 0%,#071a33 100%); border-right:1px solid rgba(255,255,255,.08); }
-[data-testid="stMetric"] { background:rgba(8,32,60,.78); border:1px solid rgba(23,212,232,.16); border-radius:16px; padding:14px 16px; box-shadow:0 12px 30px rgba(0,0,0,.18); }
-[data-testid="stDataFrame"] { border:1px solid rgba(23,212,232,.22); border-radius:14px; overflow:hidden; }
-div.stButton > button { border-radius:10px; font-weight:700; border:1px solid rgba(23,212,232,.35); }
-div.stButton > button[kind="primary"] { background:linear-gradient(90deg,#11c7df,#37e4d6); color:#041225; border:0; }
-.kero-title { font-size:2rem; font-weight:800; letter-spacing:-.02em; margin-bottom:.1rem; }
-.kero-sub { color:#9fc6e8; margin-bottom:1rem; }
-.kero-card { background:rgba(7,26,51,.78); border:1px solid rgba(255,255,255,.08); border-radius:16px; padding:16px; margin-bottom:14px; }
-.kero-badge { display:inline-block; padding:6px 10px; border-radius:999px; background:rgba(23,212,232,.12); color:#8cf4ff; border:1px solid rgba(23,212,232,.24); font-size:.82rem; font-weight:700; }
-</style>
-"""
-st.markdown(PREMIUM_CSS, unsafe_allow_html=True)
+def _bootstrap_com_logo_oficial():
+    bundled, _ = _original_bootstrap()
+    return bundled, ui.APP_ROOT / "IMG-20260826-WA0013 (1).jpg"
+ui._bootstrap = _bootstrap_com_logo_oficial
 
-init_db()
-BUNDLED_XLSX = APP_ROOT / "data" / "KERO FISH_Financeira_Completa_Preenchida.xlsx"
-LOGO = APP_ROOT / "logo.jpg.jpg"
-ensure_workbook(BUNDLED_XLSX)
+def _sidebar_profissional(logo):
+    pages = ["▦  Painel Geral", "◫  Produtos", "♟  Fornecedores", "🛒  Compras", "◈  Estoque", "♙  Clientes", "🛍  Vendas", "◉  Financeiro", "▤  Despesas", "▣  Contas a Pagar", "▧  Contas a Receber", "▰  Entregas", "▥  Relatórios", "⇩  Importar Planilha", "⌕  Auditoria", "◉  Diagnóstico", "☁  Backup"]
+    mapping = {p: p.split("  ", 1)[1] for p in pages}
+    with ui.st.sidebar:
+        if logo.exists(): ui.st.image(str(logo), width=175)
+        ui.st.markdown(f"<div class='brand-version'><b>PREMIUM</b><span>v{ui.__version__}</span></div>", unsafe_allow_html=True)
+        selected = ui.st.radio("Navegação", pages, label_visibility="collapsed")
+        ui.st.markdown("<div class='user-card'>👤 &nbsp; <b>Marcos Robério</b><br><small>Administrador</small></div>", unsafe_allow_html=True)
+        return mapping[selected]
+ui.sidebar = _sidebar_profissional
 
-# Importação idempotente: só acrescenta o que ainda não foi migrado.
-if BUNDLED_XLSX.exists() and "auto_import_done" not in st.session_state:
+_logo_path = ui.APP_ROOT / "IMG-20260826-WA0013 (1).jpg"
+wm = ""
+if _logo_path.exists():
+    b64 = base64.b64encode(_logo_path.read_bytes()).decode("ascii")
+    wm = ('[data-testid="stAppViewContainer"]::before{content:"";position:fixed;left:58%;top:53%;' 'width:min(36vw,520px);aspect-ratio:1;transform:translate(-50%,-50%);' f'background:url("data:image/jpeg;base64,{b64}") center/contain no-repeat;' 'opacity:.014;pointer-events:none;z-index:0}')
+
+ui.PREMIUM_CSS = f"""<style>
+:root{{--navy:#031426;--navy2:#061e38;--gold:#f1b92f}} html,body,[class*="css"]{{font-family:Inter,Segoe UI,Arial,sans-serif}} .stApp{{background:linear-gradient(135deg,#061d35 0%,#031426 55%,#041a30 100%);color:#fff}} [data-testid="stHeader"]{{background:#031426e8;border-bottom:1px solid #174b76}} .block-container{{padding-top:3.4rem!important;max-width:none!important;width:100%!important;padding-left:.7rem!important;padding-right:.7rem!important}} [data-testid="stSidebar"]{{width:220px!important;min-width:220px!important;max-width:220px!important;background:linear-gradient(180deg,#04182c 0%,#021120 100%);border-right:1px solid #1c4468;box-shadow:8px 0 30px #0006}} [data-testid="stSidebar"]>div:first-child{{width:220px!important}} [data-testid="stSidebar"] img{{border-radius:50%;border:3px solid var(--gold);box-shadow:0 0 0 4px #fff,0 0 0 6px var(--gold),0 10px 28px #0007;margin:4px auto 0}} [data-testid="stSidebar"] [role="radiogroup"] label{{padding:6px 8px;border-radius:8px;margin:0;color:#edf6ff;font-size:13px}} [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked){{background:linear-gradient(90deg,#e9a915,#f6c94e);color:#08213b;font-weight:900;box-shadow:0 5px 14px #0005}} .brand-version{{display:flex;justify-content:center;gap:6px;align-items:center;margin:12px 0 14px}}.brand-version b{{background:#f5b927;color:#152238;padding:5px 10px;border-radius:8px}}.brand-version span{{background:#0879d9;padding:5px 9px;border-radius:8px;color:white}} .user-card{{margin-top:12px;padding:10px;border:1px solid #234d70;border-radius:10px;background:#071f38;font-size:12px}} .kero-top{{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--gold);padding:0 2px 8px;margin:0 0 10px}}.kero-top h2{{margin:0;font-size:26px;line-height:1.25}}.kero-top .premium{{background:#f4b928;color:#17233b;padding:5px 12px;border-radius:8px;font-weight:900;margin-left:8px;display:inline-block;vertical-align:middle}}.kero-date{{color:#e8f2fb;font-weight:650;font-size:13px}} .exec-title{{font-size:27px;font-weight:900;margin:0}}.exec-sub{{color:#d2e1ee;margin-bottom:10px;font-size:13px}} .kpi-grid{{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;margin-bottom:10px}} .metric-card{{min-width:0;height:108px;border-radius:11px;padding:12px 11px;border:1px solid #ffffff2b;box-shadow:0 7px 20px #0004;position:relative;overflow:hidden}}.metric-card:after{{content:"";position:absolute;width:70px;height:70px;border-radius:50%;right:-27px;top:-28px;background:#ffffff16}} .metric-label{{font-size:10.5px;line-height:1.15;opacity:.96;min-height:24px}}.metric-value{{font-size:19px;font-weight:900;margin-top:5px;white-space:nowrap;letter-spacing:-.02em}}.metric-note{{font-size:9.5px;margin-top:4px;opacity:.88}} .green{{background:linear-gradient(135deg,#08793f,#035d32)}}.red{{background:linear-gradient(135deg,#d52f28,#a31313)}}.blue{{background:linear-gradient(135deg,#0b78e5,#0750a7)}}.gold{{background:linear-gradient(135deg,#e68c09,#b96000)}}.purple{{background:linear-gradient(135deg,#7a39dc,#412096)}}.teal{{background:linear-gradient(135deg,#07816f,#045a5d)}}.navycard{{background:linear-gradient(135deg,#168da5,#087186)}} [data-testid="stVerticalBlockBorderWrapper"]{{background:linear-gradient(180deg,#071f38,#04172b);border:1px solid #1a496f!important;border-radius:12px!important;box-shadow:0 8px 24px #0003}} [data-testid="stVerticalBlockBorderWrapper"] h3{{margin-top:0;color:#fff;font-size:18px}} [data-testid="stDataFrame"],[data-testid="stDataEditor"]{{border:1px solid #1b4a70;border-radius:9px;overflow:hidden}} .alert-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}}.alert-box{{min-height:118px;border-radius:10px;padding:11px;border:1px solid #214a6b;background:#082640}}.alert-box.warn{{background:#3b3316aa;border-color:#b78a17}}.alert-box.danger{{background:#3d2027aa;border-color:#a73b4b}}.alert-box.good{{background:#07392eaa;border-color:#1d7f66}}.alert-icon{{font-size:22px}}.alert-label{{font-size:11px;margin-top:7px;color:#d5e5f1}}.alert-value{{font-size:22px;font-weight:900;margin-top:4px}}.alert-note{{font-size:10px;color:#d3e1ec}} .footerbar{{display:flex;gap:22px;align-items:center;border-top:1px solid #1d4668;margin-top:10px;padding:9px 2px 2px;color:#d7e5ef;font-size:11px}}.footerbar span:last-child{{margin-left:auto}} @media(max-width:1180px){{.kpi-grid{{grid-template-columns:repeat(4,minmax(0,1fr))}}}} {wm}
+</style>"""
+
+def _safe_df(sql, params=None):
     try:
-        st.session_state["auto_import_report"] = import_excel(BUNDLED_XLSX, create_backup=False)
-    except Exception as exc:
-        st.session_state["auto_import_error"] = str(exc)
-    st.session_state["auto_import_done"] = True
+        with ui.connect() as conn: return pd.read_sql_query(sql, conn, params=params)
+    except Exception: return pd.DataFrame()
+def _moeda_br_num(v):
+    try: return f"R$ {float(v):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except Exception: return "R$ 0,00"
+def _data_br(v):
+    try: return pd.to_datetime(v, errors="coerce", dayfirst=True).strftime("%d/%m/%Y")
+    except Exception: return str(v or "")
+def _parse_dates(series):
+    try: return pd.to_datetime(series, errors="coerce", format="mixed", dayfirst=True)
+    except TypeError: return pd.to_datetime(series, errors="coerce", dayfirst=True)
+def _chart_theme(chart): return chart.configure_view(strokeOpacity=0).configure_axis(labelColor="#dce8f2", titleColor="#dce8f2", gridColor="#173b5a", domainColor="#355d7b", tickColor="#355d7b").configure_legend(labelColor="#dce8f2", titleColor="#dce8f2")
+def _kpi_html(items):
+    return "<div class='kpi-grid'>" + "".join(f"<div class='metric-card {css}'><div class='metric-label'>{icon}&nbsp;&nbsp;{label}</div><div class='metric-value'>{value}</div><div class='metric-note'>{note}</div></div>" for css,icon,label,value,note in items) + "</div>"
 
+def painel_executivo():
+    hoje=date.today(); hoje_br=hoje.strftime("%d/%m/%Y"); ano_atual=hoje.year; mes_atual=hoje.month
+    vendas_raw=_safe_df("SELECT id,data,produto,COALESCE(quantidade,0) quantidade,COALESCE(total,0) total FROM vendas")
+    if not vendas_raw.empty:
+        vendas_raw["dt"]=_parse_dates(vendas_raw["data"]); vendas_raw["total"]=pd.to_numeric(vendas_raw["total"],errors="coerce").fillna(0.0); vendas_raw["quantidade"]=pd.to_numeric(vendas_raw["quantidade"],errors="coerce").fillna(0.0)
+    else: vendas_raw=pd.DataFrame(columns=["id","data","produto","quantidade","total","dt"])
+    ui.st.markdown(f"<div class='kero-top'><div><h2>Kero Fish ERP <span class='premium'>PREMIUM</span></h2></div><div class='kero-date'>📅 {hoje_br}</div></div>",unsafe_allow_html=True); ui.st.markdown("<div class='exec-title'>📊 Painel Geral</div><div class='exec-sub'>Visão executiva de vendas, caixa, compromissos e estoque.</div>",unsafe_allow_html=True)
 
-def sidebar():
-    with st.sidebar:
-        st.markdown("## Kero Fish")
-        if LOGO.exists():
-            st.image(str(LOGO), use_container_width=True)
-        st.markdown("<div style='text-align:center;font-weight:800;letter-spacing:.08em;margin-top:-8px'>PEIXE E CAMARÃO</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='kero-badge'>ERP Premium v{__version__}</div>", unsafe_allow_html=True)
-        st.caption(f"Banco: {DB_PATH.name}")
-        report = st.session_state.get("auto_import_report")
-        if report:
-            st.success(f"Base completa sincronizada: {report.inserted['compras']} compra(s), {report.inserted['vendas']} venda(s) nova(s).")
-        if st.session_state.get("auto_import_error"):
-            st.error("Falha na sincronização inicial: " + st.session_state["auto_import_error"])
-        st.markdown("---")
-        pages = ["Painel Geral","Produtos","Fornecedores","Compras","Estoque","Clientes","Vendas","Financeiro","Despesas","Contas a Pagar","Contas a Receber","Entregas","Relatórios","Importar Planilha","Auditoria","Backup"]
-        return st.radio("Navegação", pages, label_visibility="collapsed")
+    # Filtro exclusivo dos cartões: os demais campos do painel continuam independentes.
+    anos_kpi=sorted({int(y) for y in vendas_raw["dt"].dropna().dt.year.tolist()}|{ano_atual},reverse=True)
+    nomes=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+    fk1,fk2,fk3=ui.st.columns([1.15,.85,1.0])
+    modo_kpi=fk1.selectbox("Período dos indicadores",["Mensal","Anual"],key="kpi_periodo")
+    ano_kpi=int(fk2.selectbox("Ano",anos_kpi,index=anos_kpi.index(ano_atual),key="kpi_ano"))
+    mes_kpi=None
+    if modo_kpi=="Mensal":
+        mes_kpi=int(fk3.selectbox("Mês",list(range(1,13)),index=mes_atual-1,format_func=lambda m:nomes[m-1],key="kpi_mes"))
+    else:
+        fk3.markdown("<div style='height:29px'></div><small>Acumulado de janeiro a dezembro</small>",unsafe_allow_html=True)
+    m=metrics_for_period(ui,ano_kpi,mes_kpi)
+    nota_periodo=f"{nomes[mes_kpi-1]}/{ano_kpi}" if mes_kpi else f"Ano {ano_kpi}"
+    ui.st.markdown(_kpi_html([("green","↥","Entradas realizadas",ui.moeda(m["entradas"]),nota_periodo),("red","↧","Saídas realizadas",ui.moeda(m["saidas"]),nota_periodo),("blue","▣","Saldo realizado",ui.moeda(m["saldo"]),nota_periodo),("gold","♙","Contas a receber",ui.moeda(m["receber"]),nota_periodo),("purple","▤","Contas a pagar",ui.moeda(m["pagar"]),nota_periodo),("teal","🛒","Vendas",ui.moeda(m["vendas"]),nota_periodo),("navycard","▥","Vendas registradas",f"{m['pedidos']} pedidos",nota_periodo)]),unsafe_allow_html=True)
 
+    anos=sorted({int(y) for y in vendas_raw["dt"].dropna().dt.year.tolist()}|{ano_atual},reverse=True); c1,c2,c3=ui.st.columns([1.28,.82,1.12],gap="small")
+    with c1:
+        with ui.st.container(border=True):
+            h1,h2=ui.st.columns([3,1]); h1.markdown("### Vendas por mês"); ano=h2.selectbox("Ano",anos,index=anos.index(ano_atual),label_visibility="collapsed",key="ano_dashboard")
+            ano_df=vendas_raw[vendas_raw["dt"].dt.year==ano].copy() if not vendas_raw.empty else vendas_raw.copy(); mensal_sum=pd.DataFrame(columns=["mes","Vendas"])
+            if not ano_df.empty: ano_df["mes"]=ano_df["dt"].dt.month; mensal_sum=ano_df.groupby("mes",as_index=False)["total"].sum().rename(columns={"total":"Vendas"})
+            mensal=pd.DataFrame({"mes":range(1,13),"Mês":nomes}).merge(mensal_sum,on="mes",how="left").fillna({"Vendas":0.0}); mensal["Valor"]=mensal["Vendas"].apply(_moeda_br_num); x_axis=alt.Axis(labelAngle=-50,labelOverlap=False,labelLimit=90,values=nomes,title=None)
+            max_vendas=max(float(mensal["Vendas"].max()),1.0); teto=max_vendas*1.18; y_axis=alt.Axis(title="Vendas (R$)",labelExpr="replace(format(datum.value, ',.0f'), ',', '.')")
+            barras_base=alt.Chart(mensal).encode(x=alt.X("Mês:N",sort=nomes,axis=x_axis),y=alt.Y("Vendas:Q",scale=alt.Scale(domain=[0,teto],nice=False),axis=y_axis))
+            bars=barras_base.mark_bar(color="#E2B84B",cornerRadiusTopLeft=3,cornerRadiusTopRight=3,size=24).encode(tooltip=[alt.Tooltip("Mês:N",title="Mês"),alt.Tooltip("Valor:N",title="Vendas")]); labels=barras_base.mark_text(dy=-8,color="#f7e7b3",fontSize=9,clip=False).encode(text=alt.Text("Valor:N")).transform_filter("datum.Vendas > 0"); ui.st.altair_chart(_chart_theme((bars+labels).properties(height=300)),use_container_width=True); ui.st.caption("Valores em R$ (Real) • Janeiro a Dezembro")
+    produtos=_safe_df("SELECT nome,categoria FROM produtos"); categoria_map={str(r["nome"]).strip().lower():str(r["categoria"] or "Outros") for _,r in produtos.iterrows()} if not produtos.empty else {}; ano_vendas=vendas_raw[vendas_raw["dt"].dt.year==ano].copy() if not vendas_raw.empty else vendas_raw.copy()
+    if not ano_vendas.empty: ano_vendas["Categoria"]=ano_vendas["produto"].astype(str).str.strip().str.lower().map(categoria_map).fillna("Outros")
+    with c2:
+        with ui.st.container(border=True):
+            ui.st.markdown("### Vendas por Categoria")
+            if not ano_vendas.empty:
+                cats=ano_vendas.groupby("Categoria",as_index=False)["total"].sum().sort_values("total",ascending=False); total_cat=float(cats["total"].sum()); cats["Participação"]=cats["total"].apply(lambda x:f"{(float(x)/total_cat*100):.2f}%".replace(".",",") if total_cat else "0,00%"); cats["Valor (R$)"]=cats["total"].apply(_moeda_br_num); tabela=cats[["Categoria","Participação","Valor (R$)"]]; total_row=pd.DataFrame([{"Categoria":"Total","Participação":"100,00%","Valor (R$)":_moeda_br_num(total_cat)}]); ui.st.dataframe(pd.concat([tabela,total_row],ignore_index=True),hide_index=True,use_container_width=True,height=280)
+            else: ui.st.info("Sem vendas no ano selecionado.")
+    with c3:
+        with ui.st.container(border=True):
+            ui.st.markdown(f"### Top 15 Produtos — {ano}")
+            if not ano_vendas.empty:
+                top=ano_vendas.groupby("produto",as_index=False).agg(total=("total","sum"),quantidade=("quantidade","sum")).sort_values("total",ascending=False).head(15); top["rotulo"]=top.apply(lambda r:f"{_moeda_br_num(r['total'])} • {float(r['quantidade']):,.2f} kg".replace(",","X").replace(".",",").replace("X","."),axis=1); base=alt.Chart(top).encode(y=alt.Y("produto:N",sort=alt.SortField(field="total",order="descending"),title=None,axis=alt.Axis(labelColor="#e6f0f7",labelLimit=130)),x=alt.X("total:Q",title=None,axis=alt.Axis(labelColor="#dce8f2",gridColor="#173b5a"))); bars_top=base.mark_bar(color="#E2B84B",cornerRadiusEnd=3,size=11).encode(tooltip=[alt.Tooltip("produto:N",title="Produto"),alt.Tooltip("total:Q",title="Faturamento",format=",.2f"),alt.Tooltip("quantidade:Q",title="Quantidade (kg)",format=",.2f")]); labels_top=base.mark_text(align="left",baseline="middle",dx=5,color="#f7e7b3",fontSize=9).encode(text=alt.Text("rotulo:N")); ui.st.altair_chart(_chart_theme((bars_top+labels_top).properties(height=445)).configure_view(continuousWidth=430),use_container_width=True)
+            else: ui.st.info("Sem vendas no ano selecionado.")
+            ui.st.caption("Ranking por faturamento • R$ e quantidade vendida em kg")
+    estoque=ui.stock_df(); n_prod=len(estoque) if estoque is not None else 0; n_baixo=int((estoque["Situacao"]=="BAIXO").sum()) if estoque is not None and not estoque.empty and "Situacao" in estoque else 0; n_neg=int((estoque["Situacao"]=="NEGATIVO").sum()) if estoque is not None and not estoque.empty and "Situacao" in estoque else 0; left,right=ui.st.columns([1.02,1.28],gap="small")
+    with left:
+        with ui.st.container(border=True): ui.st.markdown("### 📦 Estoque e Alertas"); ui.st.markdown(f"<div class='alert-grid'><div class='alert-box'><div class='alert-icon'>＋</div><div class='alert-label'>Itens cadastrados</div><div class='alert-value'>{n_prod}</div><div class='alert-note'>produtos</div></div><div class='alert-box warn'><div class='alert-icon'>⚠</div><div class='alert-label'>Estoque baixo</div><div class='alert-value'>{n_baixo}</div><div class='alert-note'>produtos</div></div><div class='alert-box danger'><div class='alert-icon'>▲</div><div class='alert-label'>Estoque negativo</div><div class='alert-value'>{n_neg}</div><div class='alert-note'>produtos</div></div><div class='alert-box good'><div class='alert-icon'>↓</div><div class='alert-label'>Validade próxima</div><div class='alert-value'>—</div><div class='alert-note'>verificar lotes</div></div></div>",unsafe_allow_html=True)
+    with right:
+        with ui.st.container(border=True):
+            ui.st.markdown("### 🧾 Últimas Movimentações"); mov=_safe_df("SELECT data,descricao,tipo,valor FROM financeiro ORDER BY data DESC,id DESC LIMIT 5")
+            if not mov.empty: mov.columns=["Data","Descrição","Tipo","Valor (R$)"]; mov["Data"]=mov["Data"].apply(_data_br); mov["Valor (R$)"]=mov["Valor (R$)"].apply(_moeda_br_num); ui.st.dataframe(mov,hide_index=True,use_container_width=True,height=210)
+            else: ui.st.info("Nenhuma movimentação encontrada.")
+    ui.st.markdown(f"<div class='footerbar'><span>👤 Usuário: admin</span><span>♙ Perfil: Administrador</span><span>🗄 Banco de dados: {ui.DB_PATH.name}</span><span>● Sistema online</span><span>Kero Fish ERP Premium v{ui.__version__}</span></div>",unsafe_allow_html=True)
 
-def page_header(title, subtitle=""):
-    st.markdown(f"<div class='kero-title'>{title}</div>", unsafe_allow_html=True)
-    if subtitle:
-        st.markdown(f"<div class='kero-sub'>{subtitle}</div>", unsafe_allow_html=True)
-
-
-def editable_grid(table: str, sql: str, editable: list[str], disabled: list[str] | None = None, key: str | None = None):
-    df = query_df(sql)
-    if df.empty:
-        st.info("Nenhum registro encontrado.")
-        return
-    edited = st.data_editor(df, use_container_width=True, hide_index=True, num_rows="fixed", disabled=(disabled or ["id"]), key=key or f"grid_{table}", height=460)
-    if st.button("💾 Salvar alterações", type="primary", key=f"save_{table}_{key}"):
-        n = save_grid(table, df, edited, editable)
-        if n:
-            st.success(f"{n} registro(s) atualizado(s).")
-            st.rerun()
-        st.info("Nenhuma alteração detectada.")
-
-
-def painel():
-    page_header("📊 Painel Geral", "Visão executiva de vendas, caixa, compromissos e estoque.")
-    m = dashboard_metrics()
-    c = st.columns(4)
-    c[0].metric("Entradas realizadas", moeda(m["entradas"]))
-    c[1].metric("Saídas realizadas", moeda(m["saidas"]))
-    c[2].metric("Saldo realizado", moeda(m["saldo"]))
-    c[3].metric("Faturamento", moeda(m["vendas"]))
-    c2 = st.columns(4)
-    c2[0].metric("Contas a receber", moeda(m["receber"]))
-    c2[1].metric("Contas a pagar", moeda(m["pagar"]))
-    c2[2].metric("Vendas registradas", m["qtd_vendas"])
-    c2[3].metric("Compras registradas", m["qtd_compras"])
-    st.markdown("### Estoque e alertas")
-    estoque = stock_df()
-    st.dataframe(estoque, use_container_width=True, hide_index=True)
-    neg = estoque[estoque["Situacao"] == "NEGATIVO"] if not estoque.empty else estoque
-    if not neg.empty:
-        st.warning("Há produto(s) com estoque histórico negativo. Isso indica venda na planilha sem a correspondente compra/entrada histórica. O sistema não inventou estoque para corrigir o dado de origem.")
-
-
-def produtos():
-    page_header("🐟 Produtos", "Cadastro mestre com preços, custo e estoque mínimo.")
-    with st.expander("➕ Novo produto", expanded=False):
-        with st.form("novo_produto"):
-            c1,c2,c3 = st.columns(3)
-            nome=c1.text_input("Produto *"); categoria=c2.text_input("Categoria", "Outros"); unidade=c3.text_input("Unidade", "kg")
-            c4,c5,c6 = st.columns(3)
-            custo=c4.number_input("Custo médio",0.0,step=.01); preco=c5.number_input("Preço de venda",0.0,step=.01); minimo=c6.number_input("Estoque mínimo",0.0,step=.01)
-            fornecedor=st.text_input("Fornecedor padrão")
-            if st.form_submit_button("Cadastrar", type="primary") and nome.strip():
-                with connect() as conn:
-                    conn.execute("INSERT OR IGNORE INTO produtos(nome,categoria,unidade,custo_medio,preco_venda,estoque_minimo,fornecedor_padrao,ativo) VALUES (?,?,?,?,?,?,?,1)",(nome.strip(),categoria,unidade,custo,preco,minimo,fornecedor))
-                st.rerun()
-    editable_grid("produtos","SELECT id,nome,categoria,unidade,preco_venda,custo_medio,estoque_minimo,fornecedor_padrao,ativo FROM produtos ORDER BY nome",["nome","categoria","unidade","preco_venda","custo_medio","estoque_minimo","fornecedor_padrao","ativo"], ["id"], "produtos")
-
-
-def fornecedores():
-    page_header("🚚 Fornecedores", "Fornecedores vinculados aos produtos e compras.")
-    with st.form("novo_fornecedor"):
-        c1,c2,c3=st.columns(3)
-        nome=c1.text_input("Fornecedor *"); tel=c2.text_input("Telefone"); contato=c3.text_input("Contato")
-        endereco=st.text_input("Endereço"); produto=st.text_input("Produto fornecido")
-        if st.form_submit_button("Cadastrar fornecedor", type="primary") and nome.strip():
-            with connect() as conn:
-                conn.execute("INSERT INTO fornecedores(fornecedor,telefone,contato,endereco,produto_fornecido,ativo) VALUES (?,?,?,?,?,1)",(nome.strip(),tel,contato,endereco,produto))
-            st.rerun()
-    editable_grid("fornecedores","SELECT id,fornecedor,contato,telefone,endereco,produto_fornecido,prazo_pagamento,observacoes,ativo FROM fornecedores ORDER BY fornecedor",["fornecedor","contato","telefone","endereco","produto_fornecido","prazo_pagamento","observacoes","ativo"],["id"],"fornecedores")
-
-
-def clientes():
-    page_header("👥 Clientes", "Cadastro de clientes e dados de entrega.")
-    with st.form("novo_cliente"):
-        c1,c2,c3=st.columns(3); nome=c1.text_input("Nome *"); tel=c2.text_input("Telefone"); cidade=c3.text_input("Cidade")
-        endereco=st.text_input("Endereço"); obs=st.text_area("Observações")
-        if st.form_submit_button("Cadastrar cliente", type="primary") and nome.strip():
-            with connect() as conn:
-                conn.execute("INSERT INTO clientes(nome,telefone,cidade,endereco,observacoes,ativo) VALUES (?,?,?,?,?,1)",(nome.strip(),tel,cidade,endereco,obs))
-            st.rerun()
-    editable_grid("clientes","SELECT id,nome,telefone,cidade,endereco,observacoes,ativo FROM clientes ORDER BY nome",["nome","telefone","cidade","endereco","observacoes","ativo"],["id"],"clientes")
-
-
-def compras():
-    page_header("📦 Compras", "Entrada de mercadoria integrada ao estoque e ao contas a pagar.")
-    with st.form("nova_compra"):
-        c1,c2,c3=st.columns(3); data=c1.date_input("Data",date.today()); fornecedor=c2.text_input("Fornecedor *"); produto=c3.text_input("Produto *")
-        c4,c5,c6=st.columns(3); qtd=c4.number_input("Quantidade",0.0,step=.01); custo=c5.number_input("Custo unitário",0.0,step=.01); pgto=c6.selectbox("Pagamento",["A prazo","PIX","Dinheiro","Cartão","Transferência"])
-        lote=st.text_input("Lote"); validade=st.text_input("Validade"); local=st.text_input("Local de estoque")
-        pago=st.checkbox("Compra já paga")
-        if st.form_submit_button("Registrar compra", type="primary"):
-            try:
-                register_purchase(data.isoformat(),fornecedor,produto,qtd,custo,lote,validade,local,pgto,"Pago" if pago else "Pendente")
-                st.success("Compra registrada e estoque atualizado."); st.rerun()
-            except Exception as exc: st.error(str(exc))
-    editable_grid("compras","SELECT id,data,fornecedor,produto,quantidade,custo_unitario,total,lote,validade,local_estoque,forma_pagamento,status_pagamento,vencimento FROM compras ORDER BY data DESC,id DESC",["data","fornecedor","produto","quantidade","custo_unitario","total","lote","validade","local_estoque","forma_pagamento","status_pagamento","vencimento"],["id"],"compras")
-
-
-def vendas():
-    page_header("🧾 Vendas", "Pedidos integrados ao estoque, recebimentos e entregas.")
-    with st.form("nova_venda"):
-        c1,c2,c3=st.columns(3); data=c1.date_input("Data",date.today()); cliente=c2.text_input("Cliente *"); produto=c3.text_input("Produto *")
-        c4,c5,c6=st.columns(3); qtd=c4.number_input("Quantidade",0.0,step=.01); preco=c5.number_input("Preço unitário",0.0,step=.01); desc=c6.number_input("Desconto",0.0,step=.01)
-        c7,c8,c9=st.columns(3); forma=c7.selectbox("Pagamento",["PIX","Dinheiro","Cartão","Transferência","A prazo"]); recebido=c8.number_input("Valor recebido",0.0,step=.01); entrega=c9.checkbox("Tem entrega")
-        status=st.selectbox("Status do pedido",["Em preparação","Aguardando","Saiu para entrega","Entregue","Cancelado"])
-        if st.form_submit_button("Registrar venda", type="primary"):
-            try:
-                register_sale(data.isoformat(),cliente,produto,qtd,preco,desc,forma,recebido,status,entrega)
-                st.success("Venda registrada e integrações atualizadas."); st.rerun()
-            except Exception as exc: st.error(str(exc))
-    editable_grid("vendas","SELECT id,pedido,data,cliente,produto,quantidade,preco_unitario,desconto,total,forma_pagamento,status_pagamento,valor_recebido,vencimento,status_pedido,entrega FROM vendas ORDER BY data DESC,id DESC",["data","cliente","produto","quantidade","preco_unitario","desconto","total","forma_pagamento","status_pagamento","valor_recebido","vencimento","status_pedido","entrega"],["id","pedido"],"vendas")
-
-
-def simple_page(title, subtitle, table, sql, editable):
-    page_header(title, subtitle)
-    editable_grid(table,sql,editable,["id"],table)
-
-
-def estoque():
-    page_header("🧊 Estoque", "Saldo calculado por movimentos. Compras entram; vendas saem; ajustes ficam auditáveis.")
-    st.dataframe(stock_df(),use_container_width=True,hide_index=True)
-    with st.form("ajuste_estoque"):
-        c1,c2,c3=st.columns(3); produto=c1.text_input("Produto"); tipo=c2.selectbox("Tipo",["AJUSTE_ENTRADA","AJUSTE_SAIDA","PERDA"]); qtd=c3.number_input("Quantidade",0.0,step=.01)
-        obs=st.text_input("Motivo/observação")
-        if st.form_submit_button("Registrar ajuste") and produto.strip() and qtd>0:
-            sinal=qtd if tipo=="AJUSTE_ENTRADA" else -qtd
-            with connect() as conn: conn.execute("INSERT INTO movimentos_estoque(data,produto,tipo,quantidade,origem,origem_id,observacao) VALUES (?,?,?,?,?,?,?)",(hoje(),produto,tipo,sinal,"Ajuste",None,obs))
-            st.rerun()
-    st.markdown("### Histórico de movimentos")
-    st.dataframe(query_df("SELECT * FROM movimentos_estoque ORDER BY id DESC LIMIT 1000"),use_container_width=True,hide_index=True)
-
-
-def relatorios():
-    page_header("📈 Relatórios", "Indicadores gerenciais para decisão.")
-    st.markdown("### Vendas por produto")
-    st.dataframe(query_df("SELECT produto,COUNT(*) pedidos,SUM(quantidade) quantidade,SUM(total) faturamento FROM vendas GROUP BY produto ORDER BY faturamento DESC"),use_container_width=True,hide_index=True)
-    st.markdown("### Compras por fornecedor")
-    st.dataframe(query_df("SELECT fornecedor,COUNT(*) compras,SUM(total) total_comprado FROM compras GROUP BY fornecedor ORDER BY total_comprado DESC"),use_container_width=True,hide_index=True)
-    st.markdown("### Fluxo por categoria")
-    st.dataframe(query_df("SELECT tipo,categoria,SUM(valor) valor FROM financeiro GROUP BY tipo,categoria ORDER BY tipo,categoria"),use_container_width=True,hide_index=True)
-
-
-def importar():
-    page_header("📥 Importar Planilha", "Importação idempotente: a mesma base pode ser processada novamente sem duplicar registros já migrados.")
-    up=st.file_uploader("Selecione a planilha Excel",type=["xlsx"])
-    if up and st.button("Importar agora",type="primary"):
-        with tempfile.NamedTemporaryFile(delete=False,suffix=".xlsx") as tmp:
-            tmp.write(up.getvalue()); temp=Path(tmp.name)
-        try:
-            r=import_excel(temp,create_backup=True)
-            st.success("Importação concluída.")
-            st.json({"inseridos":r.inserted,"ignorados_existentes":r.skipped,"avisos":r.warnings})
-        except Exception as exc: st.error(str(exc))
-
-
-def auditoria():
-    page_header("🛡️ Auditoria", "Rastreabilidade de importações e alterações estruturais.")
-    st.dataframe(query_df("SELECT * FROM import_log ORDER BY id DESC LIMIT 2000"),use_container_width=True,hide_index=True)
-
-
-def backup():
-    page_header("💾 Backup", "Proteção da base SQLite antes de alterações importantes.")
-    if st.button("Criar backup agora",type="primary"):
-        p=backup_db("manual"); st.success(f"Backup criado: {p.name}")
-    arquivos=sorted(BACKUP_DIR.glob("*.db"),reverse=True)
-    if arquivos:
-        st.dataframe(pd.DataFrame([{"arquivo":p.name,"tamanho_kb":round(p.stat().st_size/1024,1)} for p in arquivos]),use_container_width=True,hide_index=True)
-
-
-page=sidebar()
-if page=="Painel Geral": painel()
-elif page=="Produtos": produtos()
-elif page=="Fornecedores": fornecedores()
-elif page=="Clientes": clientes()
-elif page=="Compras": compras()
-elif page=="Vendas": vendas()
-elif page=="Estoque": estoque()
-elif page=="Financeiro": simple_page("💰 Financeiro","Entradas e saídas realizadas.","financeiro","SELECT id,data,tipo,categoria,descricao,valor,forma_pagamento,origem,origem_id FROM financeiro ORDER BY data DESC,id DESC",["data","tipo","categoria","descricao","valor","forma_pagamento","origem","origem_id"])
-elif page=="Despesas": simple_page("🧾 Despesas","Custos e despesas operacionais.","despesas","SELECT id,data,categoria,descricao,valor,forma_pagamento,pago,fornecedor,observacao FROM despesas ORDER BY data DESC,id DESC",["data","categoria","descricao","valor","forma_pagamento","pago","fornecedor","observacao"])
-elif page=="Contas a Pagar": simple_page("📤 Contas a Pagar","Obrigações pendentes e pagas.","contas_pagar","SELECT id,descricao,fornecedor,valor_total,valor_pago,vencimento,status,forma_pagamento,origem,origem_id FROM contas_pagar ORDER BY status,vencimento",["descricao","fornecedor","valor_total","valor_pago","vencimento","status","forma_pagamento"])
-elif page=="Contas a Receber": simple_page("📥 Contas a Receber","Recebíveis de vendas a prazo ou parcialmente pagas.","contas_receber","SELECT id,descricao,cliente,valor_total,valor_recebido,vencimento,status,forma_pagamento,origem,origem_id FROM contas_receber ORDER BY status,vencimento",["descricao","cliente","valor_total","valor_recebido","vencimento","status","forma_pagamento"])
-elif page=="Entregas": simple_page("🛵 Entregas","Acompanhamento logístico dos pedidos.","entregas","SELECT id,pedido,cliente,endereco,taxa,status,observacao FROM entregas ORDER BY id DESC",["pedido","cliente","endereco","taxa","status","observacao"])
-elif page=="Relatórios": relatorios()
-elif page=="Importar Planilha": importar()
-elif page=="Auditoria": auditoria()
-elif page=="Backup": backup()
+ui.painel=painel_executivo
+ui.run()
