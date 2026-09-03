@@ -137,7 +137,7 @@ def install_premium_operations(ui) -> None:
         ui.editable_grid("despesas", "SELECT id,data,categoria,descricao,valor,forma_pagamento,pago,fornecedor,observacao FROM despesas ORDER BY data DESC,id DESC", ["data","categoria","descricao","valor","forma_pagamento","fornecedor","observacao"], ["id","pago"], "despesas_v121")
 
     def _open_accounts(table, value_paid_col):
-        sql = f"SELECT id,descricao,valor,{value_paid_col} pago,status FROM {table} WHERE status IN ('Pendente','Parcial') ORDER BY vencimento,id"
+        sql = f"SELECT id,descricao,valor_total AS valor,{value_paid_col} pago,status FROM {table} WHERE status IN ('Pendente','Parcial') ORDER BY vencimento,id"
         try:
             with ui.connect() as conn:
                 return pd.read_sql_query(sql, conn)
