@@ -13,6 +13,7 @@ SECURITY_BUILD = "2026-09-02-login-gate"
 # - proteção integral de exercícios fechados;
 # - análise executiva com DRE gerencial, caixa projetado e riscos;
 # - autenticação individual dos sócios e administração de acessos;
+# - recuperação segura dos indicadores quando o razão financeiro estiver vazio;
 # - acabamento visual premium.
 from . import ui as ui  # noqa: E402
 from .annual import ensure_professional_schema, install_annual_order_patch  # noqa: E402
@@ -26,6 +27,7 @@ from .closing_guards import install_closing_guards  # noqa: E402
 from .analytics import install_management_analytics  # noqa: E402
 from .premium_visual import install_premium_visual  # noqa: E402
 from .security import install_security  # noqa: E402
+from .dashboard_recovery import install_dashboard_recovery  # noqa: E402
 from .executive_luxury import install_executive_luxury  # noqa: E402
 
 ui.init_db()
@@ -41,4 +43,5 @@ install_closing_guards(ui)
 install_management_analytics(ui)
 install_premium_visual(ui)
 install_security(ui)
+install_dashboard_recovery(ui)
 install_executive_luxury(ui)
