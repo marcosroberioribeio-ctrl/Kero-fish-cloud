@@ -146,6 +146,29 @@ def install_premium_operations(ui) -> None:
 
     def payables_page():
         premium_header("📤 Contas a Pagar", "Obrigações, vencimentos e baixas financeiras parciais ou totais.")
+
+        with st.expander("➕ Nova conta a pagar", expanded=False):
+            with st.form("nova_cp_v121"):
+                c1, c2 = st.columns(2)
+                desc_new = c1.text_input("Descrição *", placeholder="Ex.: ALUGUEL")
+                fornecedor_new = c2.text_input("Fornecedor / favorecido")
+                c3, c4, c5 = st.columns(3)
+                valor_new = c3.number_input("Valor total", min_value=0.0, step=.01)
+                venc_new = c4.date_input("Vencimento", date.today())
+                forma_new = c5.selectbox("Forma prevista", ["PIX","Dinheiro","Cartão","Transferência","Boleto","Outro"], key="cp_nova_forma")
+                if st.form_submit_button("Cadastrar conta", type="primary"):
+                    if not desc_new.strip() or valor_new <= 0:
+                        st.error("Informe a descrição e um valor maior que zero.")
+                    else:
+                        with ui.connect() as conn:
+                            cur = conn.execute(
+                                "INSERT INTO contas_pagar(fornecedor,descricao,valor,valor_pago,vencimento,status,origem_tipo,forma_pagamento) VALUES (?,?,?,?,?,'Pendente','manual',?)",
+                                (fornecedor_new.strip(), desc_new.strip(), valor_new, 0.0, venc_new.isoformat(), forma_new),
+                            )
+                            _audit(conn, "contas_pagar", cur.lastrowid, "Conta a pagar cadastrada manualmente")
+                        st.success("Conta a pagar cadastrada.")
+                        st.rerun()
+
         pending = _open_accounts("contas_pagar", "valor_pago")
         with st.expander("💳 Registrar pagamento", expanded=False):
             if pending.empty:
