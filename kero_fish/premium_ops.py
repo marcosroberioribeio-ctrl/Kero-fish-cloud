@@ -276,35 +276,76 @@ def install_premium_operations(ui) -> None:
     ui.estoque = stock_plus
 
     def reports_plus():
-        premium_header("📈 Relatórios", "Análise gerencial por exercício, com histórico contínuo e fechamento anual protegido.")
-        years = available_years(); year = st.selectbox("Exercício", years, key="rel_ano_v121")
-        start, end = f"{year}-01-01", f"{year}-12-31"
-        summary = year_summary(year)
+        premium_header("📈 Relatórios", "Análise gerencial mensal ou anual, preservando o histórico contínuo e o fechamento do exercício.")
+
+        nomes_meses = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+        f1, f2, f3 = st.columns([1, 1, 1])
+        periodo = f1.selectbox("Período", ["Mensal", "Anual"], key="rel_periodo_v121")
+        years = available_years()
+        year = int(f2.selectbox("Ano", years, key="rel_ano_v121"))
+        month = None
+        if periodo == "Mensal":
+            month = int(f3.selectbox("Mês", list(range(1, 13)), index=date.today().month - 1, format_func=lambda m: nomes_meses[m-1], key="rel_mes_v121"))
+            start_date = date(year, month, 1)
+            next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+            end_date = next_month - timedelta(days=1)
+            periodo_label = f"{nomes_meses[month-1]}/{year}"
+        else:
+            f3.markdown("<div class='kf-mini' style='padding-top:29px'>Janeiro a Dezembro</div>", unsafe_allow_html=True)
+            start_date = date(year, 1, 1)
+            end_date = date(year, 12, 31)
+            periodo_label = str(year)
+
+        start, end = start_date.isoformat(), end_date.isoformat()
+
+        def scalar(sql, params):
+            try:
+                with ui.connect() as conn:
+                    row = conn.execute(sql, params).fetchone()
+                    return float((row[0] if row else 0) or 0)
+            except Exception:
+                return 0.0
+
+        vendas_total = scalar("SELECT COALESCE(SUM(total),0) FROM vendas WHERE data BETWEEN ? AND ? AND upper(COALESCE(status_pedido,''))<>'CANCELADO'", (start, end))
+        compras_total = scalar("SELECT COALESCE(SUM(total),0) FROM compras WHERE data BETWEEN ? AND ?", (start, end))
+        entradas_total = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE data BETWEEN ? AND ? AND upper(tipo)='ENTRADA'", (start, end))
+        saidas_total = scalar("SELECT COALESCE(SUM(valor),0) FROM financeiro WHERE data BETWEEN ? AND ? AND upper(tipo) IN ('SAÍDA','SAIDA')", (start, end))
+        saldo_total = entradas_total - saidas_total
+        receber_aberto = scalar("SELECT COALESCE(SUM(valor_total-valor_recebido),0) FROM contas_receber WHERE vencimento BETWEEN ? AND ? AND status IN ('Pendente','Parcial')", (start, end))
+        pagar_aberto = scalar("SELECT COALESCE(SUM(valor_total-valor_pago),0) FROM contas_pagar WHERE vencimento BETWEEN ? AND ? AND status IN ('Pendente','Parcial')", (start, end))
+
+        st.caption(f"Período selecionado: {periodo_label}")
         c1,c2,c3,c4 = st.columns(4)
-        c1.metric("Vendas", _money(summary["vendas"])); c2.metric("Compras", _money(summary["compras"])); c3.metric("Entradas", _money(summary["entradas"])); c4.metric("Saídas", _money(summary["saidas"]))
-        tabs = st.tabs(["Vendas por produto","Compras por fornecedor","Fluxo financeiro","Exercício anual"])
+        c1.metric("Vendas", _money(vendas_total)); c2.metric("Compras", _money(compras_total)); c3.metric("Entradas", _money(entradas_total)); c4.metric("Saídas", _money(saidas_total))
+        c5,c6,c7 = st.columns(3)
+        c5.metric("Saldo", _money(saldo_total)); c6.metric("Contas a receber", _money(receber_aberto)); c7.metric("Contas a pagar", _money(pagar_aberto))
+
+        tabs = st.tabs(["Vendas por produto","Compras por fornecedor","Fluxo financeiro","Resumo do período"])
         with tabs[0]:
-            st.dataframe(ui.query_df("SELECT produto,COUNT(*) pedidos,SUM(quantidade) quantidade,SUM(total) faturamento FROM vendas WHERE data BETWEEN ? AND ? GROUP BY produto ORDER BY SUM(total) DESC", (start,end)), use_container_width=True, hide_index=True)
+            st.dataframe(ui.query_df("SELECT produto,COUNT(*) pedidos,SUM(quantidade) quantidade,SUM(total) faturamento FROM vendas WHERE data BETWEEN ? AND ? AND upper(COALESCE(status_pedido,''))<>'CANCELADO' GROUP BY produto ORDER BY SUM(total) DESC", (start,end)), use_container_width=True, hide_index=True)
         with tabs[1]:
-            st.dataframe(ui.query_df("SELECT fornecedor,COUNT(*) compras,SUM(total) total_comprado FROM compras WHERE data BETWEEN ? AND ? GROUP BY fornecedor ORDER BY SUM(total) DESC", (start,end)), use_container_width=True, hide_index=True)
+            st.dataframe(ui.query_df("SELECT fornecedor,COUNT(*) compras,SUM(quantidade) quantidade,SUM(total) total_comprado FROM compras WHERE data BETWEEN ? AND ? GROUP BY fornecedor ORDER BY SUM(total) DESC", (start,end)), use_container_width=True, hide_index=True)
         with tabs[2]:
             st.dataframe(ui.query_df("SELECT tipo,categoria,SUM(valor) valor FROM financeiro WHERE data BETWEEN ? AND ? GROUP BY tipo,categoria ORDER BY tipo,categoria", (start,end)), use_container_width=True, hide_index=True)
         with tabs[3]:
-            info = closing_info(year)
-            st.write(f"Saldo realizado no exercício: **{_money(summary['saldo'])}**")
-            st.write(f"Contas atualmente em aberto: receber **{_money(summary['receber_aberto'])}** • pagar **{_money(summary['pagar_aberto'])}**")
-            if info:
-                st.success(f"Exercício {year} fechado em {info['fechado_em'].replace('T',' ')}. O histórico permanece disponível para consulta.")
+            st.write(f"Saldo realizado no período: **{_money(saldo_total)}**")
+            st.write(f"Contas em aberto com vencimento no período: receber **{_money(receber_aberto)}** • pagar **{_money(pagar_aberto)}**")
+            if periodo == "Anual":
+                info = closing_info(year)
+                if info:
+                    st.success(f"Exercício {year} fechado em {info['fechado_em'].replace('T',' ')}. O histórico permanece disponível para consulta.")
+                else:
+                    st.info("Fechar o exercício cria um snapshot gerencial; nenhum registro é apagado e o estoque continua para o ano seguinte.")
+                    notes = st.text_area("Observações do fechamento", key=f"close_notes_{year}")
+                    confirm = st.checkbox(f"Confirmo o fechamento do exercício {year}.", key=f"close_confirm_{year}")
+                    if st.button("🔒 Fechar exercício", disabled=not confirm, key=f"close_year_{year}"):
+                        try:
+                            safe_backup(f"pre_fechamento_{year}")
+                            close_year(year, notes)
+                            st.success(f"Exercício {year} fechado com backup de segurança.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(str(exc))
             else:
-                st.info("Fechar o exercício cria um snapshot gerencial; nenhum registro é apagado e o estoque continua para o ano seguinte.")
-                notes = st.text_area("Observações do fechamento", key=f"close_notes_{year}")
-                confirm = st.checkbox(f"Confirmo o fechamento do exercício {year}.", key=f"close_confirm_{year}")
-                if st.button("🔒 Fechar exercício", disabled=not confirm, key=f"close_year_{year}"):
-                    try:
-                        safe_backup(f"pre_fechamento_{year}")
-                        close_year(year, notes)
-                        st.success(f"Exercício {year} fechado com backup de segurança.")
-                        st.rerun()
-                    except Exception as exc:
-                        st.error(str(exc))
+                st.info("No modo mensal, os indicadores e tabelas consideram somente o mês selecionado. O fechamento do exercício permanece disponível no modo Anual.")
     ui.relatorios = reports_plus
