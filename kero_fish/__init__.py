@@ -25,8 +25,8 @@ from .consistency import install_consistency_guards  # noqa: E402
 from .closing_guards import install_closing_guards  # noqa: E402
 from .analytics import install_management_analytics  # noqa: E402
 from .premium_visual import install_premium_visual  # noqa: E402
-from .executive_luxury import install_executive_luxury  # noqa: E402
 from .security import install_security  # noqa: E402
+from .executive_luxury import install_executive_luxury  # noqa: E402
 
 ui.init_db()
 ensure_professional_schema()
@@ -40,5 +40,5 @@ install_consistency_guards(ui)
 install_closing_guards(ui)
 install_management_analytics(ui)
 install_premium_visual(ui)
-install_executive_luxury(ui)
 install_security(ui)
+install_executive_luxury(ui)
