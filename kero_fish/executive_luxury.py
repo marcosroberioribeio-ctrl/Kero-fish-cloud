@@ -23,7 +23,7 @@ html body [data-testid='stVerticalBlockBorderWrapper']{background:linear-gradien
 html body [data-testid='stVerticalBlockBorderWrapper'] h3{font-size:23px!important}
 html body .alert-label{font-size:15px!important}.alert-value{font-size:27px!important}.alert-note{font-size:14px!important}.footerbar{font-size:14px!important}
 
-/* Gráfico mensal: retorna para proporção intermediária e limpa. */
+/* Gráfico mensal: proporção intermediária e limpa. */
 html body [data-testid='stVegaLiteChart'] svg text{font-size:11px!important}
 
 /* Abas e formulários permanecem com a legibilidade aprovada. */
@@ -39,10 +39,18 @@ html body .stButton>button,html body .stFormSubmitButton>button{font-size:15px!i
 
 
 def install_executive_luxury(ui) -> None:
-    """Instala CSS de luxo e garante reaplicação depois do CSS-base do app."""
-    ui.st.markdown(LUXURY_CSS, unsafe_allow_html=True)
+    """Garante que o acabamento V12.1 seja a última camada visual renderizada."""
     try:
-        if isinstance(getattr(ui, 'PREMIUM_CSS', None), str) and LUXURY_CSS not in ui.PREMIUM_CSS:
-            ui.PREMIUM_CSS += LUXURY_CSS
+        original_run = ui.run
+        if getattr(original_run, "_kero_luxury_wrapped", False):
+            return
+
+        def run_com_luxo(*args, **kwargs):
+            result = original_run(*args, **kwargs)
+            ui.st.markdown(LUXURY_CSS, unsafe_allow_html=True)
+            return result
+
+        run_com_luxo._kero_luxury_wrapped = True
+        ui.run = run_com_luxo
     except Exception:
-        pass
+        ui.st.markdown(LUXURY_CSS, unsafe_allow_html=True)
