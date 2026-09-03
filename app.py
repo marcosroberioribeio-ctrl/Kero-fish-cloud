@@ -9,6 +9,7 @@ import altair as alt
 import pandas as pd
 
 from kero_fish import ui
+from kero_fish.dashboard_period import metrics_for_period
 
 _original_bootstrap = ui._bootstrap
 
@@ -56,18 +57,32 @@ def _kpi_html(items):
     return "<div class='kpi-grid'>" + "".join(f"<div class='metric-card {css}'><div class='metric-label'>{icon}&nbsp;&nbsp;{label}</div><div class='metric-value'>{value}</div><div class='metric-note'>{note}</div></div>" for css,icon,label,value,note in items) + "</div>"
 
 def painel_executivo():
-    m=ui.dashboard_metrics(); hoje=date.today(); hoje_br=hoje.strftime("%d/%m/%Y"); ano_atual=hoje.year; mes_atual=hoje.month
+    hoje=date.today(); hoje_br=hoje.strftime("%d/%m/%Y"); ano_atual=hoje.year; mes_atual=hoje.month
     vendas_raw=_safe_df("SELECT id,data,produto,COALESCE(quantidade,0) quantidade,COALESCE(total,0) total FROM vendas")
     if not vendas_raw.empty:
         vendas_raw["dt"]=_parse_dates(vendas_raw["data"]); vendas_raw["total"]=pd.to_numeric(vendas_raw["total"],errors="coerce").fillna(0.0); vendas_raw["quantidade"]=pd.to_numeric(vendas_raw["quantidade"],errors="coerce").fillna(0.0)
     else: vendas_raw=pd.DataFrame(columns=["id","data","produto","quantidade","total","dt"])
-    vendas_atuais=vendas_raw[(vendas_raw["dt"].dt.year==ano_atual)&(vendas_raw["dt"].dt.month==mes_atual)] if not vendas_raw.empty else vendas_raw; valor_mes=float(vendas_atuais["total"].sum()) if not vendas_atuais.empty else 0.0; qtd_mes=int(len(vendas_atuais))
     ui.st.markdown(f"<div class='kero-top'><div><h2>Kero Fish ERP <span class='premium'>PREMIUM</span></h2></div><div class='kero-date'>📅 {hoje_br}</div></div>",unsafe_allow_html=True); ui.st.markdown("<div class='exec-title'>📊 Painel Geral</div><div class='exec-sub'>Visão executiva de vendas, caixa, compromissos e estoque.</div>",unsafe_allow_html=True)
-    ui.st.markdown(_kpi_html([("green","↥","Entradas realizadas",ui.moeda(m["entradas"]),"Este mês"),("red","↧","Saídas realizadas",ui.moeda(m["saidas"]),"Este mês"),("blue","▣","Saldo realizado",ui.moeda(m["saldo"]),"Este mês"),("gold","♙","Contas a receber",ui.moeda(m["receber"]),"Pendências"),("purple","▤","Contas a pagar",ui.moeda(m["pagar"]),"Pendências"),("teal","🛒","Vendas do mês",ui.moeda(valor_mes),hoje.strftime("%m/%Y")),("navycard","▥","Vendas registradas",f"{qtd_mes} pedidos","Este mês")]),unsafe_allow_html=True)
+
+    # Filtro exclusivo dos cartões: os demais campos do painel continuam independentes.
+    anos_kpi=sorted({int(y) for y in vendas_raw["dt"].dropna().dt.year.tolist()}|{ano_atual},reverse=True)
+    nomes=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+    fk1,fk2,fk3=ui.st.columns([1.15,.85,1.0])
+    modo_kpi=fk1.selectbox("Período dos indicadores",["Mensal","Anual"],key="kpi_periodo")
+    ano_kpi=int(fk2.selectbox("Ano",anos_kpi,index=anos_kpi.index(ano_atual),key="kpi_ano"))
+    mes_kpi=None
+    if modo_kpi=="Mensal":
+        mes_kpi=int(fk3.selectbox("Mês",list(range(1,13)),index=mes_atual-1,format_func=lambda m:nomes[m-1],key="kpi_mes"))
+    else:
+        fk3.markdown("<div style='height:29px'></div><small>Acumulado de janeiro a dezembro</small>",unsafe_allow_html=True)
+    m=metrics_for_period(ui,ano_kpi,mes_kpi)
+    nota_periodo=f"{nomes[mes_kpi-1]}/{ano_kpi}" if mes_kpi else f"Ano {ano_kpi}"
+    ui.st.markdown(_kpi_html([("green","↥","Entradas realizadas",ui.moeda(m["entradas"]),nota_periodo),("red","↧","Saídas realizadas",ui.moeda(m["saidas"]),nota_periodo),("blue","▣","Saldo realizado",ui.moeda(m["saldo"]),nota_periodo),("gold","♙","Contas a receber",ui.moeda(m["receber"]),nota_periodo),("purple","▤","Contas a pagar",ui.moeda(m["pagar"]),nota_periodo),("teal","🛒","Vendas",ui.moeda(m["vendas"]),nota_periodo),("navycard","▥","Vendas registradas",f"{m['pedidos']} pedidos",nota_periodo)]),unsafe_allow_html=True)
+
     anos=sorted({int(y) for y in vendas_raw["dt"].dropna().dt.year.tolist()}|{ano_atual},reverse=True); c1,c2,c3=ui.st.columns([1.28,.82,1.12],gap="small")
     with c1:
         with ui.st.container(border=True):
-            h1,h2=ui.st.columns([3,1]); h1.markdown("### Vendas por mês"); ano=h2.selectbox("Ano",anos,index=anos.index(ano_atual),label_visibility="collapsed",key="ano_dashboard"); nomes=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+            h1,h2=ui.st.columns([3,1]); h1.markdown("### Vendas por mês"); ano=h2.selectbox("Ano",anos,index=anos.index(ano_atual),label_visibility="collapsed",key="ano_dashboard")
             ano_df=vendas_raw[vendas_raw["dt"].dt.year==ano].copy() if not vendas_raw.empty else vendas_raw.copy(); mensal_sum=pd.DataFrame(columns=["mes","Vendas"])
             if not ano_df.empty: ano_df["mes"]=ano_df["dt"].dt.month; mensal_sum=ano_df.groupby("mes",as_index=False)["total"].sum().rename(columns={"total":"Vendas"})
             mensal=pd.DataFrame({"mes":range(1,13),"Mês":nomes}).merge(mensal_sum,on="mes",how="left").fillna({"Vendas":0.0}); mensal["Valor"]=mensal["Vendas"].apply(_moeda_br_num); x_axis=alt.Axis(labelAngle=-50,labelOverlap=False,labelLimit=90,values=nomes,title=None)
