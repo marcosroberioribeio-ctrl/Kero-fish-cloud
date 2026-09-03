@@ -36,15 +36,9 @@ def _sidebar_profissional(logo):
     with ui.st.sidebar:
         if logo.exists():
             ui.st.image(str(logo), width=175)
-        ui.st.markdown(
-            f"<div class='brand-version'><b>PREMIUM</b><span>v{ui.__version__}</span></div>",
-            unsafe_allow_html=True,
-        )
+        ui.st.markdown(f"<div class='brand-version'><b>PREMIUM</b><span>v{ui.__version__}</span></div>", unsafe_allow_html=True)
         selected = ui.st.radio("Navegação", pages, label_visibility="collapsed")
-        ui.st.markdown(
-            "<div class='user-card'>👤 &nbsp; <b>Marcos Robério</b><br><small>Administrador</small></div>",
-            unsafe_allow_html=True,
-        )
+        ui.st.markdown("<div class='user-card'>👤 &nbsp; <b>Marcos Robério</b><br><small>Administrador</small></div>", unsafe_allow_html=True)
         return mapping[selected]
 
 
@@ -54,12 +48,10 @@ _logo_path = ui.APP_ROOT / "IMG-20260826-WA0013 (1).jpg"
 wm = ""
 if _logo_path.exists():
     b64 = base64.b64encode(_logo_path.read_bytes()).decode("ascii")
-    wm = (
-        '[data-testid="stAppViewContainer"]::before{content:"";position:fixed;left:58%;top:53%;'
-        'width:min(36vw,520px);aspect-ratio:1;transform:translate(-50%,-50%);'
-        f'background:url("data:image/jpeg;base64,{b64}") center/contain no-repeat;'
-        'opacity:.014;pointer-events:none;z-index:0}'
-    )
+    wm = ('[data-testid="stAppViewContainer"]::before{content:"";position:fixed;left:58%;top:53%;'
+          'width:min(36vw,520px);aspect-ratio:1;transform:translate(-50%,-50%);'
+          f'background:url("data:image/jpeg;base64,{b64}") center/contain no-repeat;'
+          'opacity:.014;pointer-events:none;z-index:0}')
 
 ui.PREMIUM_CSS = f"""
 <style>
@@ -122,19 +114,13 @@ def _parse_dates(series):
 
 
 def _chart_theme(chart):
-    return chart.configure_view(strokeOpacity=0).configure_axis(
-        labelColor="#dce8f2", titleColor="#dce8f2", gridColor="#173b5a",
-        domainColor="#355d7b", tickColor="#355d7b"
-    ).configure_legend(labelColor="#dce8f2", titleColor="#dce8f2")
+    return chart.configure_view(strokeOpacity=0).configure_axis(labelColor="#dce8f2", titleColor="#dce8f2", gridColor="#173b5a", domainColor="#355d7b", tickColor="#355d7b").configure_legend(labelColor="#dce8f2", titleColor="#dce8f2")
 
 
 def _kpi_html(items):
     cards = []
     for css, icon, label, value, note in items:
-        cards.append(
-            f"<div class='metric-card {css}'><div class='metric-label'>{icon}&nbsp;&nbsp;{label}</div>"
-            f"<div class='metric-value'>{value}</div><div class='metric-note'>{note}</div></div>"
-        )
+        cards.append(f"<div class='metric-card {css}'><div class='metric-label'>{icon}&nbsp;&nbsp;{label}</div><div class='metric-value'>{value}</div><div class='metric-note'>{note}</div></div>")
     return "<div class='kpi-grid'>" + "".join(cards) + "</div>"
 
 
@@ -145,70 +131,47 @@ def painel_executivo():
     ano_atual = hoje.year
     mes_atual = hoje.month
 
-    vendas_raw = _safe_df("SELECT id,data,produto,COALESCE(total,0) total FROM vendas")
+    vendas_raw = _safe_df("SELECT id,data,produto,COALESCE(quantidade,0) quantidade,COALESCE(total,0) total FROM vendas")
     if not vendas_raw.empty:
         vendas_raw["dt"] = _parse_dates(vendas_raw["data"])
         vendas_raw["total"] = pd.to_numeric(vendas_raw["total"], errors="coerce").fillna(0.0)
+        vendas_raw["quantidade"] = pd.to_numeric(vendas_raw["quantidade"], errors="coerce").fillna(0.0)
     else:
-        vendas_raw = pd.DataFrame(columns=["id","data","produto","total","dt"])
+        vendas_raw = pd.DataFrame(columns=["id","data","produto","quantidade","total","dt"])
 
     vendas_atuais = vendas_raw[(vendas_raw["dt"].dt.year == ano_atual) & (vendas_raw["dt"].dt.month == mes_atual)] if not vendas_raw.empty else vendas_raw
     valor_mes = float(vendas_atuais["total"].sum()) if not vendas_atuais.empty else 0.0
     qtd_mes = int(len(vendas_atuais))
 
-    ui.st.markdown(
-        f"<div class='kero-top'><div><h2>Kero Fish ERP <span class='premium'>PREMIUM</span></h2></div>"
-        f"<div class='kero-date'>📅 {hoje_br}</div></div>", unsafe_allow_html=True,
-    )
-    ui.st.markdown(
-        "<div class='exec-title'>📊 Painel Geral</div><div class='exec-sub'>Visão executiva de vendas, caixa, compromissos e estoque.</div>",
-        unsafe_allow_html=True,
-    )
-
+    ui.st.markdown(f"<div class='kero-top'><div><h2>Kero Fish ERP <span class='premium'>PREMIUM</span></h2></div><div class='kero-date'>📅 {hoje_br}</div></div>", unsafe_allow_html=True)
+    ui.st.markdown("<div class='exec-title'>📊 Painel Geral</div><div class='exec-sub'>Visão executiva de vendas, caixa, compromissos e estoque.</div>", unsafe_allow_html=True)
     ui.st.markdown(_kpi_html([
-        ("green", "↥", "Entradas realizadas", ui.moeda(m["entradas"]), "Este mês"),
-        ("red", "↧", "Saídas realizadas", ui.moeda(m["saidas"]), "Este mês"),
-        ("blue", "▣", "Saldo realizado", ui.moeda(m["saldo"]), "Este mês"),
-        ("gold", "♙", "Contas a receber", ui.moeda(m["receber"]), "Pendências"),
-        ("purple", "▤", "Contas a pagar", ui.moeda(m["pagar"]), "Pendências"),
-        ("teal", "🛒", "Vendas do mês", ui.moeda(valor_mes), hoje.strftime("%m/%Y")),
+        ("green", "↥", "Entradas realizadas", ui.moeda(m["entradas"]), "Este mês"), ("red", "↧", "Saídas realizadas", ui.moeda(m["saidas"]), "Este mês"),
+        ("blue", "▣", "Saldo realizado", ui.moeda(m["saldo"]), "Este mês"), ("gold", "♙", "Contas a receber", ui.moeda(m["receber"]), "Pendências"),
+        ("purple", "▤", "Contas a pagar", ui.moeda(m["pagar"]), "Pendências"), ("teal", "🛒", "Vendas do mês", ui.moeda(valor_mes), hoje.strftime("%m/%Y")),
         ("navycard", "▥", "Vendas registradas", f"{qtd_mes} pedidos", "Este mês"),
     ]), unsafe_allow_html=True)
 
     anos = sorted({int(y) for y in vendas_raw["dt"].dropna().dt.year.tolist()} | {ano_atual}, reverse=True)
-
     c1, c2, c3 = ui.st.columns([1.48, .9, .98], gap="small")
     with c1:
         with ui.st.container(border=True):
-            h1, h2 = ui.st.columns([3,1])
-            h1.markdown("### Vendas por mês")
+            h1, h2 = ui.st.columns([3,1]); h1.markdown("### Vendas por mês")
             ano = h2.selectbox("Ano", anos, index=anos.index(ano_atual), label_visibility="collapsed", key="ano_dashboard")
             nomes = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
             ano_df = vendas_raw[vendas_raw["dt"].dt.year == ano].copy() if not vendas_raw.empty else vendas_raw.copy()
+            mensal_sum = ano_df.groupby("mes", as_index=False)["total"].sum().rename(columns={"total":"Vendas"}) if (not ano_df.empty and "mes" in ano_df) else pd.DataFrame(columns=["mes","Vendas"])
             if not ano_df.empty:
                 ano_df["mes"] = ano_df["dt"].dt.month
                 mensal_sum = ano_df.groupby("mes", as_index=False)["total"].sum().rename(columns={"total":"Vendas"})
-            else:
-                mensal_sum = pd.DataFrame(columns=["mes","Vendas"])
-            mensal = pd.DataFrame({"mes":range(1,13), "Mês":nomes}).merge(mensal_sum, on="mes", how="left").fillna({"Vendas":0.0})
-            mensal["Valor"] = mensal["Vendas"].apply(_moeda_br_num)
-
+            mensal = pd.DataFrame({"mes":range(1,13), "Mês":nomes}).merge(mensal_sum, on="mes", how="left").fillna({"Vendas":0.0}); mensal["Valor"] = mensal["Vendas"].apply(_moeda_br_num)
             x_axis = alt.Axis(labelAngle=-50, labelOverlap=False, labelLimit=95, values=nomes, title=None)
-            bars = alt.Chart(mensal).mark_bar(color="#54b8f4", cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(
-                x=alt.X("Mês:N", sort=nomes, axis=x_axis),
-                y=alt.Y("Vendas:Q", title="Vendas (R$)"),
-                tooltip=[alt.Tooltip("Mês:N", title="Mês"), alt.Tooltip("Valor:N", title="Vendas")],
-            )
-            labels = alt.Chart(mensal).mark_text(dy=-8, color="#f2f7fb", fontSize=9).encode(
-                x=alt.X("Mês:N", sort=nomes, axis=x_axis), y="Vendas:Q", text=alt.Text("Valor:N")
-            ).transform_filter("datum.Vendas > 0")
-            ui.st.altair_chart(_chart_theme((bars + labels).properties(height=305)), use_container_width=True)
-            ui.st.caption("Valores em R$ (Real) • Janeiro a Dezembro")
+            bars = alt.Chart(mensal).mark_bar(color="#54b8f4", cornerRadiusTopLeft=4, cornerRadiusTopRight=4).encode(x=alt.X("Mês:N", sort=nomes, axis=x_axis), y=alt.Y("Vendas:Q", title="Vendas (R$)"), tooltip=[alt.Tooltip("Mês:N", title="Mês"), alt.Tooltip("Valor:N", title="Vendas")])
+            labels = alt.Chart(mensal).mark_text(dy=-8, color="#f2f7fb", fontSize=9).encode(x=alt.X("Mês:N", sort=nomes, axis=x_axis), y="Vendas:Q", text=alt.Text("Valor:N")).transform_filter("datum.Vendas > 0")
+            ui.st.altair_chart(_chart_theme((bars + labels).properties(height=305)), use_container_width=True); ui.st.caption("Valores em R$ (Real) • Janeiro a Dezembro")
 
     produtos = _safe_df("SELECT nome,categoria FROM produtos")
-    categoria_map = {}
-    if not produtos.empty:
-        categoria_map = {str(r["nome"]).strip().lower(): str(r["categoria"] or "Outros") for _, r in produtos.iterrows()}
+    categoria_map = {str(r["nome"]).strip().lower(): str(r["categoria"] or "Outros") for _, r in produtos.iterrows()} if not produtos.empty else {}
     ano_vendas = vendas_raw[vendas_raw["dt"].dt.year == ano].copy() if not vendas_raw.empty else vendas_raw.copy()
     if not ano_vendas.empty:
         ano_vendas["Categoria"] = ano_vendas["produto"].astype(str).str.strip().str.lower().map(categoria_map).fillna("Outros")
@@ -217,66 +180,43 @@ def painel_executivo():
         with ui.st.container(border=True):
             ui.st.markdown("### Vendas por Categoria")
             if not ano_vendas.empty:
-                cats = ano_vendas.groupby("Categoria", as_index=False)["total"].sum().sort_values("total", ascending=False)
-                total_cat = float(cats["total"].sum())
+                cats = ano_vendas.groupby("Categoria", as_index=False)["total"].sum().sort_values("total", ascending=False); total_cat = float(cats["total"].sum())
                 cats["Participação"] = cats["total"].apply(lambda x: f"{(float(x)/total_cat*100):.2f}%".replace(".", ",") if total_cat else "0,00%")
-                cats["Valor (R$)"] = cats["total"].apply(_moeda_br_num)
-                tabela = cats[["Categoria","Participação","Valor (R$)"]]
+                cats["Valor (R$)"] = cats["total"].apply(_moeda_br_num); tabela = cats[["Categoria","Participação","Valor (R$)"]]
                 total_row = pd.DataFrame([{"Categoria":"Total","Participação":"100,00%","Valor (R$)":_moeda_br_num(total_cat)}])
                 ui.st.dataframe(pd.concat([tabela,total_row], ignore_index=True), hide_index=True, use_container_width=True, height=300)
-            else:
-                ui.st.info("Sem vendas no ano selecionado.")
+            else: ui.st.info("Sem vendas no ano selecionado.")
 
     with c3:
         with ui.st.container(border=True):
-            ui.st.markdown(f"### Top 5 Produtos — {ano}")
+            ui.st.markdown(f"### Top 10 Produtos — {ano}")
             if not ano_vendas.empty:
-                top = ano_vendas.groupby("produto", as_index=False)["total"].sum().sort_values("total", ascending=False).head(5)
-                chart_top = alt.Chart(top).mark_bar(color="#62bdf2", cornerRadiusEnd=3).encode(
-                    y=alt.Y("produto:N", sort="-x", title=None, axis=alt.Axis(labelColor="#e6f0f7", labelLimit=120)),
-                    x=alt.X("total:Q", title=None, axis=alt.Axis(labelColor="#dce8f2", gridColor="#173b5a")),
-                    tooltip=[alt.Tooltip("produto:N", title="Produto"), alt.Tooltip("total:Q", title="Valor", format=",.2f")],
-                )
-                ui.st.altair_chart(_chart_theme(chart_top.properties(height=300)), use_container_width=True)
-            else:
-                ui.st.info("Sem vendas no ano selecionado.")
-            ui.st.caption("Valores em R$ (Real)")
+                top = ano_vendas.groupby("produto", as_index=False).agg(total=("total","sum"), quantidade=("quantidade","sum")).sort_values("total", ascending=False).head(10)
+                top["rotulo"] = top.apply(lambda r: f"{_moeda_br_num(r['total'])} • {float(r['quantidade']):,.2f} kg".replace(",", "X").replace(".", ",").replace("X", "."), axis=1)
+                base = alt.Chart(top).encode(y=alt.Y("produto:N", sort=alt.SortField(field="total", order="descending"), title=None, axis=alt.Axis(labelColor="#e6f0f7", labelLimit=120)), x=alt.X("total:Q", title=None, axis=alt.Axis(labelColor="#dce8f2", gridColor="#173b5a")))
+                bars_top = base.mark_bar(color="#62bdf2", cornerRadiusEnd=3, size=13).encode(tooltip=[alt.Tooltip("produto:N", title="Produto"), alt.Tooltip("total:Q", title="Faturamento", format=",.2f"), alt.Tooltip("quantidade:Q", title="Quantidade (kg)", format=",.2f")])
+                labels_top = base.mark_text(align="left", baseline="middle", dx=5, color="#f2f7fb", fontSize=9).encode(text=alt.Text("rotulo:N"))
+                ui.st.altair_chart(_chart_theme((bars_top + labels_top).properties(height=340)).configure_view(continuousWidth=390), use_container_width=True)
+            else: ui.st.info("Sem vendas no ano selecionado.")
+            ui.st.caption("Ranking por faturamento • R$ e quantidade vendida em kg")
 
-    estoque = ui.stock_df()
-    n_prod = len(estoque) if estoque is not None else 0
+    estoque = ui.stock_df(); n_prod = len(estoque) if estoque is not None else 0
     n_baixo = int((estoque["Situacao"] == "BAIXO").sum()) if estoque is not None and not estoque.empty and "Situacao" in estoque else 0
     n_neg = int((estoque["Situacao"] == "NEGATIVO").sum()) if estoque is not None and not estoque.empty and "Situacao" in estoque else 0
-
     left, right = ui.st.columns([1.02,1.28], gap="small")
     with left:
         with ui.st.container(border=True):
             ui.st.markdown("### 📦 Estoque e Alertas")
-            ui.st.markdown(
-                f"<div class='alert-grid'>"
-                f"<div class='alert-box'><div class='alert-icon'>＋</div><div class='alert-label'>Itens cadastrados</div><div class='alert-value'>{n_prod}</div><div class='alert-note'>produtos</div></div>"
-                f"<div class='alert-box warn'><div class='alert-icon'>⚠</div><div class='alert-label'>Estoque baixo</div><div class='alert-value'>{n_baixo}</div><div class='alert-note'>produtos</div></div>"
-                f"<div class='alert-box danger'><div class='alert-icon'>▲</div><div class='alert-label'>Estoque negativo</div><div class='alert-value'>{n_neg}</div><div class='alert-note'>produtos</div></div>"
-                f"<div class='alert-box good'><div class='alert-icon'>↓</div><div class='alert-label'>Validade próxima</div><div class='alert-value'>—</div><div class='alert-note'>verificar lotes</div></div>"
-                f"</div>", unsafe_allow_html=True,
-            )
-
+            ui.st.markdown(f"<div class='alert-grid'><div class='alert-box'><div class='alert-icon'>＋</div><div class='alert-label'>Itens cadastrados</div><div class='alert-value'>{n_prod}</div><div class='alert-note'>produtos</div></div><div class='alert-box warn'><div class='alert-icon'>⚠</div><div class='alert-label'>Estoque baixo</div><div class='alert-value'>{n_baixo}</div><div class='alert-note'>produtos</div></div><div class='alert-box danger'><div class='alert-icon'>▲</div><div class='alert-label'>Estoque negativo</div><div class='alert-value'>{n_neg}</div><div class='alert-note'>produtos</div></div><div class='alert-box good'><div class='alert-icon'>↓</div><div class='alert-label'>Validade próxima</div><div class='alert-value'>—</div><div class='alert-note'>verificar lotes</div></div></div>", unsafe_allow_html=True)
     with right:
         with ui.st.container(border=True):
             ui.st.markdown("### 🧾 Últimas Movimentações")
             mov = _safe_df("SELECT data,descricao,tipo,valor FROM financeiro ORDER BY data DESC,id DESC LIMIT 5")
             if not mov.empty:
-                mov.columns = ["Data","Descrição","Tipo","Valor (R$)"]
-                mov["Data"] = mov["Data"].apply(_data_br)
-                mov["Valor (R$)"] = mov["Valor (R$)"].apply(_moeda_br_num)
+                mov.columns = ["Data","Descrição","Tipo","Valor (R$)"]; mov["Data"] = mov["Data"].apply(_data_br); mov["Valor (R$)"] = mov["Valor (R$)"].apply(_moeda_br_num)
                 ui.st.dataframe(mov, hide_index=True, use_container_width=True, height=210)
-            else:
-                ui.st.info("Nenhuma movimentação encontrada.")
-
-    ui.st.markdown(
-        f"<div class='footerbar'><span>👤 Usuário: admin</span><span>♙ Perfil: Administrador</span>"
-        f"<span>🗄 Banco de dados: {ui.DB_PATH.name}</span><span>● Sistema online</span>"
-        f"<span>Kero Fish ERP Premium v{ui.__version__}</span></div>", unsafe_allow_html=True,
-    )
+            else: ui.st.info("Nenhuma movimentação encontrada.")
+    ui.st.markdown(f"<div class='footerbar'><span>👤 Usuário: admin</span><span>♙ Perfil: Administrador</span><span>🗄 Banco de dados: {ui.DB_PATH.name}</span><span>● Sistema online</span><span>Kero Fish ERP Premium v{ui.__version__}</span></div>", unsafe_allow_html=True)
 
 
 ui.painel = painel_executivo
